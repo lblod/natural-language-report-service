@@ -9,7 +9,7 @@ Ad-hoc reports only. The scheduled reports stay in
 
 ## How it works
 
-Two documents drive everything (plan §1, §2, §3):
+Two documents drive everything:
 
 | | Who writes it | When | Where |
 |---|---|---|---|
@@ -32,7 +32,7 @@ with `mu-call-scope-id` set so jobs-controller ignores it.
 ## One identity: mu-authorization's
 
 All SPARQL goes through the template's own helpers (`mu`'s `query` and
-`update`), like ipdc-bookmarks-service. They attach the caller's session from
+`update`). They attach the caller's session from
 the request context, and mu-authorization decides graphs and visibility; the
 service never touches an auth header. The context lives for the whole run,
 also past the `202` the chat turn answers with, so background writes stay
@@ -54,7 +54,7 @@ Dutch comes back with a trace of the tool calls. The CSV lands in
 `data/files/`. `history` carries the earlier turns for follow-ups; the
 conversation lives on the caller's side, the service stores nothing.
 
-`/assistant` is the chat (plan-fable-5-1, steps 1 and 3). The turn module in
+`/assistant` is the chat. The turn module in
 `src/chat/` is generic — it imports nothing from `src/llm/` or `src/runner/`
 and moves between services without edits — and `src/report-assistant.js` is
 this service's one `answer` hook. It records the question, answers `202` with
@@ -134,7 +134,7 @@ alone. A toezicht user can run the seed and read the CSV data, but the
 may not write that type), so the report URI the tools return is dangling for
 non-admin callers. Opening this up means adding the type to their group first.
 
-## Rules the code holds to (plan §9)
+## Rules the code holds to
 
 - Query `http://database:8890/sparql`. Never virtuoso. Never sudo.
 - No `GRAPH` clauses, no property paths, no aggregates, no inline comments:
@@ -142,15 +142,13 @@ non-admin callers. Opening this up means adding the type to their group first.
 - Generated queries use full URIs, no prefixes (a bare `mu:uuid` prefixed
   name without its PREFIX line is an opaque 500).
 
-## Libraries (plan §0)
+## Libraries
 
 - `n3` — Turtle parsing (profiles, specs)
-- hand-written: CSV writer (quotes only when needed, like today's reports),
-  the query builders, the agent loop (bare `fetch`, no provider SDK, no MCP
-  SDK — the tools are internal handlers, not an HTTP protocol)
+- hand-written: CSV writer (quotes only when needed), the query builders,
+  the agent loop (bare `fetch`, no provider SDK)
 
 ## What it will not do
 
 No counting, no sorting, no top-N, no comparing two subjects, one class per
-report, suggestions stop at the public graph. §10 of the plan has the full
-list and why.
+report, suggestions stop at the public graph.

@@ -1,9 +1,5 @@
-// The turn endpoint. Mount it on the service that answers:
-//
-//   mountChat(app, { path: '/assistant', answer });
-//
-// answer(turn) is the only thing the service writes. See the plan, §3, for
-// the turn object. This file knows nothing about what the answer is.
+// The turn endpoint. Mount it with mountChat(app, { path, answer });
+// answer(turn) is the only thing the mounting service writes.
 import express from 'express';
 import { query as muQuery, update as muUpdate } from 'mu';
 import {
@@ -23,8 +19,7 @@ export function mountChat(app, { path = '/assistant', answer }) {
     const content = String(req.body?.content ?? '').trim();
     if (!content) return res.status(400).json({ error: 'content is required' });
 
-    // 1. the access check: the query carries the caller's session, and the
-    // auth layer answers with what they may read
+    // 1. the access check: the caller's session decides what is readable
     let conversation;
     try {
       conversation = await readConversation(req.params.id);
@@ -49,10 +44,8 @@ export function mountChat(app, { path = '/assistant', answer }) {
       return res.status(500).json({ error: e.message });
     }
 
-    // 2. answer now; the assistant's message comes when it comes. The
-    // template's helpers keep attaching this request's session for the
-    // whole continuation, so the writes below stay the caller's;
-    // mu-authorization is in charge of what lands where.
+    // 2. answer 202 now; the assistant's message comes when it comes. The
+    // continuation still runs as the caller.
     res.status(202).json({ id: userMessage.id });
 
     const turn = {

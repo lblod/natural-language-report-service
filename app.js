@@ -8,10 +8,8 @@ import { reportAssistant } from './src/report-assistant.js';
 
 const PROFILE_DIR = process.env.PROFILE_DIR || '/config/profiles';
 
-// Profiles load fire-and-forget, like waitForDatabase in the bbcdr services:
-// routes are registered synchronously, handlers await the same promise, and a
-// call that lands before the load finishes just waits it out (local file
-// reads). If loading failed, calls answer an error instead of crashing boot.
+// Profiles load at boot; handlers await the same promise. A failed load
+// answers an error per request instead of crashing boot.
 let profilesPromise = loadProfiles(PROFILE_DIR);
 profilesPromise.catch(e => console.error('[profiles] loading failed:', e.message));
 
@@ -23,20 +21,15 @@ async function whenProfiles() {
   }
 }
 
-// The chat. The turn module is generic (src/chat/ moves between services
-// without edits); reportAssistant is this service's one answer hook: it runs
-// the loop below with the conversation so far and turns a report run into an
-// interim message with a pending file. Step 1's echo hook, kept for tests:
-//   answer: async (turn) => { await sleep(5000); return `Je schreef: ${turn.content}`; }
+// The chat. reportAssistant is the answer hook: it runs the LLM loop with the
+// conversation so far and turns a report run into an interim message with a
+// pending file.
 mountChat(app, { path: '/assistant', answer: reportAssistant(whenProfiles) });
 
-// The endpoint. One conversation turn in Dutch, the agent loop runs inside
-// (read the profiles, look up values on the public graph, write a spec,
-// validate and repair it, run the report) and the answer in Dutch comes back
-// with a trace of the tool calls. Follow-ups carry the earlier turns in
-// `history`; the conversation lives on the caller's side.
-// The template parses application/vnd.api+json only; the question comes as
-// plain JSON, so the route parses it itself, like the chat route does.
+// POST /ask: one question in, the answer in Dutch and a trace of the tool
+// calls back. Follow-ups carry the earlier turns in `history`.
+// The template parses application/vnd.api+json only; this route parses the
+// plain JSON body itself.
 app.post('/ask', express.json(), async (req, res) => {
   const { question, history } = req.body || {};
   if (!question) return res.status(400).json({ error: 'no question in the request body' });

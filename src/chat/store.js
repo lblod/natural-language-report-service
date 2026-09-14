@@ -1,6 +1,6 @@
-// The chat's reads and writes. Copy the folder as is; nothing here knows the
-// service it lives in. Full URIs everywhere: the auth layer rejects a prefixed
-// name with no PREFIX line with an opaque 500.
+// The chat's reads and writes. Nothing here knows the service it lives in.
+// Full URIs everywhere: the auth layer rejects a prefixed name with no
+// PREFIX line with an opaque 500.
 import { randomUUID } from 'crypto';
 import { query as muQuery, update as muUpdate,
          sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime } from 'mu';
@@ -31,8 +31,7 @@ const DOCUMENT_BASE = 'http://data.lblod.info/id/chat-documents/';
 
 const u = sparqlEscapeUri;
 const s = sparqlEscapeString;
-// The template helper writes ^^xsd:dateTime; the auth layer happens to bind
-// xsd, but the rule here is full URIs, so spell the type out.
+// Full URIs, so spell the dateTime type out.
 const dt = (value) => sparqlEscapeDateTime(value)
   .replace('xsd:dateTime', '<http://www.w3.org/2001/XMLSchema#dateTime>');
 
@@ -40,9 +39,7 @@ const bindings = (json) => json.results.bindings;
 
 // --- reads --------------------------------------------------------------------
 
-// The conversation by uuid, as the caller sees it (the query carries the
-// caller's session; the auth layer answers with what they may read).
-// null when not readable.
+// The conversation by uuid, null when the caller may not read it.
 export async function readConversation(id) {
   const json = await muQuery(`
     SELECT ?conversation ?title ?creator WHERE {
@@ -96,7 +93,7 @@ export async function writeMessage({ conversationUri, content, maker, attachment
     return { ...a, id, uri: `${DOCUMENT_BASE}${id}` };
   });
 
-  // Predicate pairs are joined with a semicolon, so no list ever ends on one.
+  // Predicate pairs joined with ';', never a trailing one: it breaks the Turtle.
   const pairs = [
     `${u(T.type)} ${u(T.post)}`,
     `${u(T.type)} ${u(T.instantMessage)}`,
@@ -152,7 +149,7 @@ export async function setDocumentUrl(documentUri, url, conversationUri) {
     }`);
 }
 
-// The file failed. The card disappears; the caller says why in a message.
+// The file failed; the card disappears, the caller says why in a message.
 export async function dropDocument(documentUri) {
   await muUpdate(`
     DELETE {

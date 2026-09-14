@@ -1,6 +1,5 @@
-// The JSON schemas for the eight tools, in the shape the MCP ListTools call
-// returns. Keep these short and Dutch-aware: the descriptions are what the
-// LLM reads to decide which tool to call.
+// The JSON schemas of the eight tools. The descriptions are what the LLM
+// reads to decide which tool to call.
 
 export function toolSchemas() {
   return [

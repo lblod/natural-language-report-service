@@ -5,11 +5,6 @@ import { query as muQuery, update as muUpdate,
 export { sparqlEscapeUri, sparqlEscapeString, sparqlEscapeInt,
          sparqlEscapeDateTime, sparqlEscapeDate, sparqlEscapeBool };
 
-// All SPARQL goes through the template's own helpers, like
-// ipdc-bookmarks-service. They attach the caller's session
-// (mu-session-id, mu-call-id) from the request context, and
-// mu-authorization decides graphs and visibility. The service never
-// touches an auth header itself.
 export async function sessionQuery(sparql)  { return muQuery(sparql); }
 export async function sessionUpdate(sparql) { return muUpdate(sparql); }
 
@@ -18,10 +13,8 @@ export function stripStoreError(text) {
   return String(text).split('\n')[0].slice(0, 300);
 }
 
-// The per-request bundle the tools use: the template's query and update.
-// The request context lives for the whole run, also past the 202 the chat
-// turn answers with, so mu-authorization keeps rewriting with the caller's
-// session. We add nothing to it.
+// The request context lives for the whole run, also past the 202 a chat turn
+// answers with, so every write stays the caller's.
 export async function buildSession() {
   return { query: sessionQuery, update: sessionUpdate };
 }

@@ -1,8 +1,6 @@
-// Turn a shapes graph into the flat list an LLM reads well (plan §7.3). Not
-// Turtle: a plain text menu of entities, their fields and the code lists.
-// Code lists under INLINE_VALUES_MAX are inlined at request time
-// (sessionQuery; mu-authorization decides what is visible) and refreshed
-// every VALUES_TTL, so the LLM never has to search the short ones.
+// A profile as a plain text menu: entities, fields, code lists. Code lists up
+// to INLINE_VALUES_MAX are inlined and cached for VALUES_TTL, so the LLM
+// never has to search the short ones.
 
 import { fieldsOf, entityForClass } from '../runner/profile.js';
 import { sessionQuery } from '../db.js';

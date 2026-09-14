@@ -5,9 +5,9 @@ import { sessionUpdate, sparqlEscapeUri, sparqlEscapeString, sparqlEscapeInt,
 
 const REPORT_CLASS = process.env.REPORT_CLASS || 'http://lblod.data.gift/vocabularies/reporting/Report';
 
-// Write the file to /share, then register it once: a logical file
-// (http://data.lblod.info/files/<uuid>) plus a physical share:// file
-// pointing back with nie:dataSource. The logical URI is what you link to.
+// Register the CSV: a logical file (http://data.lblod.info/files/<uuid>) plus
+// a physical share:// file pointing back with nie:dataSource. The logical
+// URI is what you link to.
 export async function registerFile(sessionUpdateFn, fileName, filePath) {
   const size = statSync(filePath).size;
   const uuid = randomUUID();
@@ -36,8 +36,7 @@ export async function registerFile(sessionUpdateFn, fileName, filePath) {
   return logicalUri;
 }
 
-// One report pointing at the logical file URI. Insert without naming a graph;
-// the auth layer places the triples from the caller's session.
+// One report pointing at the logical file URI.
 export async function registerReport(sessionUpdateFn, title, fileUri, extra = {}) {
   const uuid = randomUUID();
   const now = new Date();

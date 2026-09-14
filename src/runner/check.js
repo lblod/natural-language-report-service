@@ -7,17 +7,16 @@ const XSD = 'http://www.w3.org/2001/XMLSchema#';
 const XSD_DATE = XSD + 'date';
 const XSD_DATETIME = XSD + 'dateTime';
 
-// The validator. checkSpec(spec, profile, maxPathDepth) runs the named checks
-// in order and returns the FIRST error as a one-element array (empty if ok).
-// Every message names the thing that is wrong in the profile's own words and
-// says what to write instead. No database call anywhere in this file — that is
-// what lets an LLM iterate for free.
+// The validator. checkSpec runs the checks in order and returns the first
+// error as a one-element array (empty if ok). Every message names the thing
+// that is wrong in the profile's own words and says what to write instead.
+// No database call anywhere in this file.
 
 const ANYOF_MAX_TERMS = 24;
 const ANYOF_MAX_TERM_LENGTH = 100;
 
-// 1 + 2. the profile names itself and is one we have. knownProfiles is the
-// Map app.js loaded at boot; omit it and the check is skipped (fixtures).
+// The spec names a profile we have. knownProfiles is the profile Map loaded
+// at boot; the check is skipped when it is omitted.
 function profileNamed(spec, knownProfiles) {
   if (!spec.profileUri) {
     return `no rep:profile named. Available: ${knownProfiles ? [...knownProfiles.values()].map(p => p.title).join(', ') : '(none)'} .`;
@@ -28,7 +27,7 @@ function profileNamed(spec, knownProfiles) {
   return null;
 }
 
-// 3 + 4. the target class is in the profile
+// The target class is in the profile
 function targetClass(spec, profile) {
   if (!spec.targetClass) {
     return `no sh:targetClass. In "${profile.title}" you can list: ${shapeList(profile)}.`;
@@ -43,13 +42,13 @@ function shapeList(profile) {
   return profile.shapes.map(s => s.label || s.targetClass).join(', ');
 }
 
-// 5. columns exist
+// Columns exist
 function columnsPresent(spec) {
   if (!spec.columns.length) return 'no columns. Add at least one rep:columns entry.';
   return null;
 }
 
-// 6. every column has a label
+// Every column has a label
 function columnLabel(spec) {
   for (const col of spec.columns) {
     if (!col.label) return 'a column has no rdfs:label.';
@@ -57,7 +56,7 @@ function columnLabel(spec) {
   return null;
 }
 
-// 7. labels unique
+// Labels are unique
 function columnLabelsUnique(spec) {
   const seen = new Map();
   for (const col of spec.columns) {
@@ -69,7 +68,7 @@ function columnLabelsUnique(spec) {
   return null;
 }
 
-// 8 + 9 + 10. every path resolves, columns end on a value, depth capped
+// Every path resolves, columns end on a value, depth capped
 function pathsResolve(spec, profile, maxPathDepth) {
   const startShapeUri = entityForClass(profile, spec.targetClass);
   for (const col of spec.columns) {
@@ -85,7 +84,7 @@ function pathsResolve(spec, profile, maxPathDepth) {
   return null;
 }
 
-// 11. sh:min/sh:max only on numbers and dates
+// sh:min/sh:max only on numbers and dates
 function collectMinMaxTyped(spec, profile) {
   const startShapeUri = entityForClass(profile, spec.targetClass);
   for (const col of spec.columns) {
@@ -108,7 +107,7 @@ function collectMinMaxTyped(spec, profile) {
   return null;
 }
 
-// 13. at most one rep:row column
+// At most one rep:row column
 function oneRowColumn(spec) {
   const rowCols = spec.columns.filter(c => c.collect === REP + 'row');
   if (rowCols.length > 1) {
@@ -118,7 +117,7 @@ function oneRowColumn(spec) {
   return null;
 }
 
-// 12 + 14. columns carry no constraints; known collect mode
+// Columns carry no constraints; known collect mode
 function columnPure(spec) {
   for (const col of spec.columns) {
     if (Object.keys(col.constraints || {}).length) {
@@ -132,7 +131,7 @@ function columnPure(spec) {
   return null;
 }
 
-// 15. no label inside a filter
+// No label inside a filter
 function filterLabel(spec) {
   for (const filter of spec.filters) {
     if ((filter.constraints || {}).label) {
@@ -142,7 +141,7 @@ function filterLabel(spec) {
   return null;
 }
 
-// 15b. a filter with a path but no constraint selects everything; the model
+// A filter with a path but no constraint selects everything; the model
 // almost certainly meant to filter. Refuse and say what to add.
 function filterConstraint(spec) {
   const MEANINGFUL = ['minCount', 'maxCount', 'hasValue', 'in', 'minInclusive',
@@ -157,7 +156,7 @@ function filterConstraint(spec) {
   return null;
 }
 
-// 16. sh:maxCount above 0 needs counting
+// sh:maxCount above 0 needs counting
 function maxCountZero(spec) {
   for (const [i, filter] of spec.filters.entries()) {
     const c = filter.constraints;
@@ -171,7 +170,7 @@ function maxCountZero(spec) {
   return null;
 }
 
-// 17 + 18. rep:anyOf size limits
+// rep:anyOf size limits
 function anyOfLimits(spec) {
   for (const [i, filter] of spec.filters.entries()) {
     const c = filter.constraints;
@@ -191,7 +190,7 @@ function anyOfLimits(spec) {
   return null;
 }
 
-// 19. sh:in mixes URIs and literals
+// sh:in must not mix URIs and literals
 function inHomogeneous(spec) {
   for (const filter of spec.filters) {
     const c = filter.constraints;
@@ -204,7 +203,7 @@ function inHomogeneous(spec) {
   return null;
 }
 
-// 20. typed literals that will not parse
+// Typed literals must parse
 function literalsParse(spec) {
   const constraintTerms = [];
   for (const filter of spec.filters) {
@@ -259,8 +258,8 @@ export function checkSpec(spec, profile, maxPathDepth, knownProfiles = null) {
   return [];
 }
 
-// The shape a column's path lands in: follow sh:node through every hop but
-// the last. walk() has already validated the path, so any gap means the walk
+// The shape a path lands in: follow sh:node through every hop but the
+// last. walk() has already validated the path, so a gap here means the walk
 // reported the real error and this can bail.
 function shapeAfter(profile, startShapeUri, hops) {
   let shapeUri = startShapeUri;

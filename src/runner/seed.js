@@ -1,8 +1,6 @@
 import { sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime, sparqlEscapeDate } from '../db.js';
 
 // Subject selection. One paged query per page; stops at ROW_LIMIT.
-// No GRAPH, no property paths, every hop its own variable.
-
 const ROW_LIMIT = Number(process.env.ROW_LIMIT || 200000);
 const PAGE_SIZE = Number(process.env.SEED_PAGE_SIZE || 5000);
 

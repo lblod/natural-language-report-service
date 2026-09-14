@@ -1,9 +1,8 @@
 import { mkdirSync, writeFileSync } from 'fs';
 
-// Rows to a CSV file. CSV_SEPARATOR is ';' by default.
-// A cell is quoted only when it holds the separator, a quote or a newline —
-// this matches the shape of today's loket-report-generation-service output.
-// A quote inside a cell is doubled, per RFC 4180.
+// Rows to a CSV file. CSV_SEPARATOR is ';' by default. A cell is quoted
+// only when it holds the separator, a quote or a newline; a quote inside a
+// cell is doubled, per RFC 4180.
 
 const CSV_SEPARATOR = process.env.CSV_SEPARATOR || ';';
 const SHARE_DIR = process.env.SHARE_DIR || '/share';

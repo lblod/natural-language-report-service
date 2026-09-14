@@ -1,10 +1,7 @@
-// The eight MCP tools the LLM calls. Each maps to a runner/ function or a
-// profile/db read. What they return is always a job URI, a status, a count,
-// a link, column names or an error we wrote, never a cell value (the §8
-// guarantee).
-//
-// The shape every tool returns is { content: [{ type: 'text', text }] } so the
-// loop can pass it straight back to the model.
+// The eight tools the LLM calls. They return a job URI, a status, a count, a
+// link, column names or an error we wrote — never a cell value. The shape
+// every tool returns is { content: [{ type: 'text', text }] }, which the loop
+// passes straight back to the model.
 
 import { checkSpec } from '../runner/check.js';
 import { parseSpec } from '../runner/spec.js';
@@ -16,12 +13,8 @@ import { lookupValues } from './lookup.js';
 const MAX_PATH_DEPTH = Number(process.env.MAX_PATH_DEPTH || 8);
 const RUN_TIMEOUT = Number(process.env.RUN_TIMEOUT || 60) * 1000;
 
-// buildTools(profiles, session) → { tools: Tool[], handlers: Map<name, fn> }
-// `session` is the request's { query, update } bundle: the template's own
-// helpers, which attach the caller's session from the request context.
-// run_report starts the run and waits up to RUN_TIMEOUT so the LLM gets the
-// result in one turn when it is quick.
-
+// buildTools(profiles, session) → { handlers }
+// run_report waits up to RUN_TIMEOUT so a quick run returns in one turn.
 export function buildTools(profiles, session) {
   const profileList = () => [...profiles.values()].map(p => ({ id: p.uri, title: p.title }));
 
@@ -75,13 +68,13 @@ export function buildTools(profiles, session) {
     const errors = checkSpec(parsed, p, MAX_PATH_DEPTH, profiles);
     if (errors.length) return text(`the spec is not valid: ${errors[0]}`);
     try {
-      // The spec's own dct:title names the report; there is no other input.
+      // The spec's dct:title names the report.
       const name = parsed.title || 'report';
       await session.onReportStart?.({ title: name, fileName: `${slug(name)}.csv` });
       const running = run(session.query, session.update, parsed, p, name);
-      // The end callback fires even when withTimeout below has given up: the
-      // run is not cancelled, and the file arrives when it arrives. The
-      // rejection handler also keeps a late failure from crashing Node 20.
+      // The end callback also fires after the timeout gave up: the run is not
+      // cancelled, the file arrives when it arrives. The .catch keeps a late
+      // failure from crashing the process.
       running
         .then((r) => session.onReportEnd?.(null, r), (e) => session.onReportEnd?.(e))
         .catch((e) => console.error('[reports] end callback failed:', e));

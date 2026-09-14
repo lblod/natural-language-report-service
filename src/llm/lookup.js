@@ -1,8 +1,6 @@
-// lookup_values: search a code list too long to inline. One query through
-// the template helper, regex on str(?label) so language-tagged labels still
-// match. Returns the matches, the total, and an `exact` flag when a label
-// equals the term (case aside) so the LLM can settle disambiguation on its
-// own.
+// Search a code list too long to inline: regex on str(?label), so
+// language-tagged labels match. Returns the matches, the total, and an
+// `exact` flag when a label equals the term (case aside).
 
 import { sessionQuery, sparqlEscapeString } from '../db.js';
 import { fieldsOf, entityForClass } from '../runner/profile.js';
@@ -24,7 +22,7 @@ export async function lookupValues(profile, term, fieldSpec) {
   // The profile's sh:class is the type the data should carry, but code lists
   // sometimes type their entries differently (MAR codes are
   // ext:supervision/Nomenclature, the profile says skos:Concept). Prefer rows
-  // matching the asked class; fall back to all rows. The query reads more
+  // matching the asked class, fall back to all rows. The query reads more
   // rows than LIMIT so an exact hit deeper in the alphabet still surfaces.
   const wanted = bindings.filter(b => type && b.type?.value === type);
   const rows = wanted.length ? wanted : bindings;
@@ -92,9 +90,8 @@ function resolveClass(profile, fieldSpec) {
     const linked = profile.shapes.find(s => s.uri === f.node);
     return linked?.targetClass || null;
   }
-  // "bestuurseenheid.naam": the model chained link→value (shape.field on the
-  // linked shape). Resolve it: find the shape whose *name or label* matches,
-  // and whose rdf:type is in the data, then search that type.
+  // The model sometimes writes shape.field on a linked shape
+  // ("bestuurseenheid.naam"); resolve it to that shape's target class.
   for (const s of profile.shapes) {
     if (s.label === shapeLabel || shortType(s.targetClass) === shapeLabel) {
       return s.targetClass;

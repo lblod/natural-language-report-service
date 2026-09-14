@@ -8,9 +8,7 @@ const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const OWL_ONTOLOGY = 'http://www.w3.org/2002/07/owl#Ontology';
 
 export async function loadProfiles(dir) {
-  // eslint-disable-next-line no-undef
   const fs = await import('fs');
-  // eslint-disable-next-line no-undef
   const path = await import('path');
   const files = fs.readdirSync(dir).filter(f => f.endsWith('.ttl')).sort();
   const profiles = new Map();

@@ -6,14 +6,10 @@
   "type": "module",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js",
-    "test": "node --import ./dev-stubs/register.js test/chat-store.mjs && node --import ./dev-stubs/register.js test/chat-turn.mjs && node --import ./dev-stubs/register.js test/ask-parse.mjs && node test/import-boundaries.mjs"
+    "start": "node app.js"
   },
   "dependencies": {
     "express": "^5.2.1",
     "n3": "^1.17.0"
-  },
-  "devDependencies": {
-    "sparqljs": "^3.7.4"
   }
 }

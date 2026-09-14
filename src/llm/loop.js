@@ -1,16 +1,6 @@
-// The agent loop. One code path, one provider: POST /v1/chat/completions
-// with tool calls, OpenAI-compatible (OpenAI, Azure, Ollama, LiteLLM, vLLM,
-// Mistral). No provider SDKs. Three variables: LLM_BASE_URL, LLM_MODEL,
-// LLM_API_KEY.
-//
-// The loop is the only stateful party: it keeps the message history, calls the
-// MCP tools through the same handlers a real MCP client would, and stops when
-// the model writes no more tool calls. validate_spec is driven up to
-// MAX_REPAIR_ROUNDS, then run_report.
-//
-// This module is what the ten-question check runs against. It does not import
-// from 'mu' or sessionQuery; it receives the tool handlers and a session
-// bundle from the caller, so it works against any profile set and any session.
+// The agent loop: POST /v1/chat/completions with tool calls,
+// OpenAI-compatible (LLM_BASE_URL, LLM_MODEL, LLM_API_KEY). No provider
+// SDKs. Stops when the model answers without tool calls.
 
 import { buildTools } from './tools.js';
 
@@ -44,13 +34,9 @@ up to three rounds. Then call run_report.
 Earlier turns are context only. Answer the last one.`;
 
 // ask(questionOrMessages, profiles, session) → { text, trace }
-// A string is one question, as before. An array is the conversation so far,
-// [{ role: 'user' | 'assistant', content }], newest last. The system prompt
-// is always this file's own; a system message in the input is dropped, so a
-// caller cannot widen it. The loop appends every model reply and tool result
-// to the messages, so a caller can keep one conversation across many reports.
-// Returns the model's final text plus a trace of every tool call it made (for
-// the leak test and for debugging).
+// A string is one question; an array is the conversation so far,
+// [{ role, content }], newest last. The system prompt is always this file's
+// own; a system message in the input is dropped.
 export async function ask(questionOrMessages, profiles, session) {
   const { handlers } = buildTools(profiles, session);
   const trace = [];
@@ -90,8 +76,7 @@ export async function ask(questionOrMessages, profiles, session) {
 }
 
 async function chat(messages) {
-  // Providers echo extra fields (litellm adds provider_specific_fields, Mistral
-  // rejects them on the way back). Send only the portable wire shape.
+  // Send only the fields every provider accepts back.
   const wire = messages.map(m => {
     const out = { role: m.role, content: m.content ?? null };
     if (m.tool_calls) {
@@ -139,8 +124,7 @@ function parseArgs(s) {
 }
 
 // messagesFor(question) — a fresh conversation: system prompt plus the user
-// question. Turn this into your own history array to follow up in the same
-// conversation.
+// question.
 export function messagesFor(question) {
   return [
     { role: 'system', content: SYSTEM_PROMPT },
@@ -148,8 +132,7 @@ export function messagesFor(question) {
   ];
 }
 
-// The tool definitions sent to the model. Same names and args as the MCP
-// schemas, trimmed to what the model needs.
+// The tool definitions sent to the model.
 import { toolSchemas } from './schemas.js';
 function toolDefs() {
   return toolSchemas().map(t => ({

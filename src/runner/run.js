@@ -5,11 +5,9 @@ import { rowsToCsv, writeCsv } from './csv.js';
 import { registerFile, registerReport } from './report.js';
 import { touch } from './job.js';
 
-// Ties the six steps together. `query` and `update` are the template's own
-// helpers: they attach the caller's session from the request context, which
-// lives for the whole run (also past the 202), so mu-authorization keeps
-// deciding graphs and visibility. Returns { reportUri, fileUri, rowCount }.
-// The task is touched once per column group so the dashboard shows movement.
+// Ties the steps together: seed → columns → assemble → CSV → register.
+// Returns { reportUri, fileUri, rowCount }. The task is touched once per
+// column group so the dashboard shows movement.
 
 export async function run(query, update, parsed, profile, title, taskUri, extra = {}) {
   const subjects = await seed(query, parsed);
@@ -29,8 +27,8 @@ export async function run(query, update, parsed, profile, title, taskUri, extra 
   return { reportUri, fileUri, rowCount: rows.length - 1, filePath };
 }
 
-// Exported for run_report: the file name must be known before the run starts,
-// so the chat can show a pending card named after the report.
+// The file name must be known before the run starts, so the chat can show a
+// pending card named after the report.
 export function slug(title) {
   return (title || 'report').toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')

@@ -1,13 +1,9 @@
 import { randomUUID } from 'crypto';
 import { sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime } from '../db.js';
 
-// cogs:Job + task:Task, written by us. No other service is involved.
-// Triples follow §6 of plan-opus-5.iteration-1-4.md; the shape follows
-// config/resources/master-job-domain.lisp.
-// Every write carries mu-call-scope-id (REPORT_SCOPE) so the delta notifier
-// lets jobs-controller ignore our statuses — it throws on unknown operations.
-// All functions take the update function to use: scopedUpdate(sparql, extra),
-// which sends the captured groups plus this scope header.
+// cogs:Job + task:Task, written by us; no other service is involved. Every
+// write carries mu-call-scope-id (REPORT_SCOPE) so the delta notifier lets
+// jobs-controller ignore our statuses — it throws on unknown operations.
 
 const REPORT_SCOPE = 'http://redpencil.data.gift/id/concept/muScope/report-generation';
 const JOB_BASE = process.env.JOB_URI_BASE || 'http://redpencil.data.gift/id/job/';
@@ -32,9 +28,7 @@ const TASK = 'http://redpencil.data.gift/vocabularies/tasks/';
 const OSLC_MESSAGE = 'http://open-services.net/ns/core#message';
 const OSLC_ERROR_URI = 'http://open-services.net/ns/core#Error';
 
-// updateFn(sparql, extraHeaders) — app.js passes scopedUpdate, which sends
-// the captured groups; the scope header is added here so every job write is
-// opt-out-able for the delta notifier.
+// Adds the scope header to every job write.
 function withScope(updateFn) {
   return async sparql => updateFn(sparql, { 'mu-call-scope-id': REPORT_SCOPE });
 }
