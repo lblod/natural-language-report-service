@@ -1,15 +1,13 @@
-// Integration check for the turn endpoint (src/chat/index.js). No stack: the
-// SPARQL endpoint is a stub in this process that answers like the auth layer
-// (JSON bindings plus the mu-auth-allowed-groups response header), and the
-// module is mounted on a real express app.
+// Integration check for the turn endpoint (src/chat/index.js). No stack:
+// the mu stub records the queries and updates, and a handler steers the
+// answers, so the test asserts on the same SPARQL the template's helpers
+// would send.
 //
 //   npm test          (or: node --import ./dev-stubs/register.js test/chat-turn.mjs)
 
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import express from 'express';
-
-const PORT = 8899;
+import { resetMu, setQueryHandler, state } from 'mu';
 
 let failures = 0;
 async function check(name, fn) {
@@ -22,58 +20,36 @@ async function check(name, fn) {
   }
 }
 
-// --- the stub auth layer ------------------------------------------------------
+// --- the stub answers -----------------------------------------------------------
 
 const KNOWN_ID = '11111111-1111-1111-1111-111111111111';
 const CONVERSATION = 'http://data.lblod.info/id/chat-conversations/9ab4';
 const ASSISTANT = 'http://data.lblod.info/id/chat-agents/rapportassistent';
-const GROUPS = '[{"variables":["account"],"name":"chat-owner"}]';
 
-const requests = [];
-const stub = http.createServer((req, res) => {
-  let body = '';
-  req.on('data', (c) => { body += c; });
-  req.on('end', () => {
-    requests.push({ method: req.method, url: req.url, headers: req.headers, body });
-    res.setHeader('Content-Type', 'application/sparql-results+json');
-    res.setHeader('mu-auth-allowed-groups', GROUPS);
-    if (req.url === '/sparql' && /SELECT/.test(body)) {
-      if (/prov%23SoftwareAgent|prov#SoftwareAgent/.test(body)) {
-        res.end(JSON.stringify({ results: { bindings: [
-          { agent: { value: ASSISTANT } },
-        ] } }));
-      } else if (body.includes(KNOWN_ID)) {
-        res.end(JSON.stringify({ results: { bindings: [
-          { conversation: { value: CONVERSATION }, creator: { value: 'http://data.lblod.info/id/gebruiker/1' } },
-        ] } }));
-      } else {
-        res.end(JSON.stringify({ results: { bindings: [] } }));
-      }
-    } else {
-      res.end('null');
-    }
-  });
+setQueryHandler((sparql) => {
+  if (sparql.includes('prov#SoftwareAgent')) {
+    return [{ agent: { value: ASSISTANT } }];
+  }
+  if (sparql.includes('sioc/ns#Thread') && sparql.includes(KNOWN_ID)) {
+    return [{ conversation: { value: CONVERSATION }, creator: { value: 'http://data.lblod.info/id/gebruiker/1' } }];
+  }
+  return [];
 });
-
-await new Promise((r) => stub.listen(PORT, r));
-process.env.MU_SPARQL_ENDPOINT = `http://localhost:${PORT}/sparql`;
 
 const { mountChat } = await import('../src/chat/index.js');
 const app = express();
-const writes = [];
 mountChat(app, {
   path: '/assistant',
   answer: async (turn) => {
-    writes.push(turn.content);
     return `Je schreef: ${turn.content}`;
   },
 });
 const server = app.listen(0);
 const base = `http://localhost:${server.address().port}`;
 
-const post = (path, body, headers = {}) => fetch(`${base}${path}`, {
+const post = (path, body) => fetch(`${base}${path}`, {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'mu-session-id': 'http://mu.semte.ch/sessions/x', ...headers },
+  headers: { 'Content-Type': 'application/json', 'mu-session-id': 'http://mu.semte.ch/sessions/x' },
   body: JSON.stringify(body),
 });
 
@@ -88,7 +64,7 @@ await check('an unreadable conversation is 404', async () => {
 });
 
 await check('a turn answers 202 with the message id, then writes the echo', async () => {
-  requests.length = 0;
+  resetMu();
   const res = await post(`/assistant/conversations/${KNOWN_ID}/turns`, { content: 'Hallo?' });
   assert.equal(res.status, 202);
   const { id } = await res.json();
@@ -96,15 +72,10 @@ await check('a turn answers 202 with the message id, then writes the echo', asyn
 
   // the answer hook runs after the 202; give it a moment
   await new Promise((r) => setTimeout(r, 200));
-  const updates = requests.filter((r) => r.method === 'POST' && /DELETE|INSERT/.test(r.body)).map((r) => r.body);
+  const updates = state.updates.map((u) => u);
   assert.ok(updates.length >= 2, 'the question and the echo are written');
   assert.ok(updates[0].includes('Hallo?'), 'the question first');
   assert.ok(updates.some((u) => u.includes('Je schreef: Hallo?')), 'the echo after');
-  // the identity carries past the 202
-  assert.ok(requests.slice(1).every((r) => r.headers['mu-auth-allowed-groups'] === GROUPS),
-    'every write carries the captured groups');
-  const sessionRead = requests[0];
-  assert.equal(sessionRead.headers['mu-session-id'], 'http://mu.semte.ch/sessions/x');
 });
 
 await check('a throwing hook writes the failure line', async () => {
@@ -112,9 +83,7 @@ await check('a throwing hook writes the failure line', async () => {
   mountChat(app2, { path: '/assistant', answer: async () => { throw new Error('boom'); } });
   const server2 = app2.listen(0);
   const base2 = `http://localhost:${server2.address().port}`;
-  const requests2 = [];
-  // route the stub's answers through a fresh recorder by watching requests on the shared stub
-  const before = requests.length;
+  resetMu();
   const res = await fetch(`${base2}/assistant/conversations/${KNOWN_ID}/turns`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'mu-session-id': 'http://mu.semte.ch/sessions/x' },
@@ -122,12 +91,10 @@ await check('a throwing hook writes the failure line', async () => {
   });
   assert.equal(res.status, 202);
   await new Promise((r) => setTimeout(r, 200));
-  const after = requests.slice(before).filter((r) => /DELETE|INSERT/.test(r.body)).map((r) => r.body);
-  assert.ok(after.some((u) => u.includes('Er ging iets mis. Probeer het opnieuw.')),
+  assert.ok(state.updates.some((u) => u.includes('Er ging iets mis. Probeer het opnieuw.')),
     'the failure message is written');
   server2.close();
 });
 
 server.close();
-stub.close();
 process.exit(failures ? 1 : 0);

@@ -4,29 +4,27 @@ import { assemble } from './assemble.js';
 import { rowsToCsv, writeCsv } from './csv.js';
 import { registerFile, registerReport } from './report.js';
 import { touch } from './job.js';
-import { groupsQuery, groupsUpdate } from '../db.js';
 
-// Ties the six steps together. Runs with the captured groups (see
-// captureGroups), returns { reportUri, fileUri, rowCount }. The task is
-// touched once per column group so the dashboard shows movement.
+// Ties the six steps together. `query` and `update` are the template's own
+// helpers: they attach the caller's session from the request context, which
+// lives for the whole run (also past the 202), so mu-authorization keeps
+// deciding graphs and visibility. Returns { reportUri, fileUri, rowCount }.
+// The task is touched once per column group so the dashboard shows movement.
 
-export async function run(allowedGroups, parsed, profile, title, taskUri, extra = {}) {
-  const queryFn = sparql => groupsQuery(sparql, allowedGroups);
-  const updateFn = (sparql, extra) => groupsUpdate(sparql, allowedGroups, extra);
-
-  const subjects = await seed(queryFn, parsed);
+export async function run(query, update, parsed, profile, title, taskUri, extra = {}) {
+  const subjects = await seed(query, parsed);
 
   const values = new Map();
-  await fetchColumns(queryFn, subjects, parsed, values,
-    taskUri ? () => touch(updateFn, taskUri) : null);
+  await fetchColumns(query, subjects, parsed, values,
+    taskUri ? () => touch(update, taskUri) : null);
 
   const rows = assemble(subjects, values, parsed);
   const fileName = `${slug(title)}.csv`;
   const csv = rowsToCsv(rows);
   const filePath = writeCsv(fileName, csv);
 
-  const fileUri = await registerFile((sparql) => updateFn(sparql), fileName, filePath);
-  const reportUri = await registerReport((sparql) => updateFn(sparql), title, fileUri, extra);
+  const fileUri = await registerFile(update, fileName, filePath);
+  const reportUri = await registerReport(update, title, fileUri, extra);
 
   return { reportUri, fileUri, rowCount: rows.length - 1, filePath };
 }

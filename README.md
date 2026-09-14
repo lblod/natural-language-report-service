@@ -29,21 +29,17 @@ chunk of subjects) → assemble (dedup + `rep:collect`) → CSV → register fil
 + report resource. The job is a `cogs:Job` + `task:Task` we write ourselves,
 with `mu-call-scope-id` set so jobs-controller ignores it.
 
-## Two identities
+## One identity: mu-authorization's
 
-| Query | Session sent | Reads |
-|---|---|---|
-| `publicQuery` | none | what the stack makes public |
-| `sessionQuery` | the caller's | what that user may read |
+All SPARQL goes through the template's own helpers (`mu`'s `query` and
+`update`), like ipdc-bookmarks-service. They attach the caller's session from
+the request context, and mu-authorization decides graphs and visibility; the
+service never touches an auth header. The context lives for the whole run,
+also past the `202` the chat turn answers with, so background writes stay
+the caller's.
 
-The LLM only ever talks to `publicQuery`. `llm/` never imports `sessionQuery`
-(CI check 2), and the `runner/` functions it calls return URIs, counts,
-statuses and column names — never a cell value (CI check 3). That split is
-the guarantee; it holds by code shape, not by a test that watches it.
-
-After the answer (or the 202 in earlier designs), the request context is
-gone. The run carries the caller's `mu-auth-allowed-groups` (captured before
-answering) on every later query.
+The tools the LLM calls return URIs, counts, statuses and column names —
+never a cell value.
 
 ## Two endpoints
 

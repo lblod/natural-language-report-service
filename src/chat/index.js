@@ -5,10 +5,10 @@
 // answer(turn) is the only thing the service writes. See the plan, §3, for
 // the turn object. This file knows nothing about what the answer is.
 import express from 'express';
+import { query as muQuery, update as muUpdate } from 'mu';
 import {
   readConversation, readHistory, findAssistant,
   writeMessage, setDocumentUrl, dropDocument,
-  groupsQuery, groupsUpdate,
 } from './store.js';
 
 const TEXT = {
@@ -23,25 +23,22 @@ export function mountChat(app, { path = '/assistant', answer }) {
     const content = String(req.body?.content ?? '').trim();
     if (!content) return res.status(400).json({ error: 'content is required' });
 
-    // 1. the access check: can this session read the conversation?
+    // 1. the access check: the query carries the caller's session, and the
+    // auth layer answers with what they may read
     let conversation;
     try {
-      conversation = await readConversation(req.params.id, req.get('mu-session-id'));
+      conversation = await readConversation(req.params.id);
     } catch (e) {
       console.error('[chat] conversation read failed:', e);
       return res.status(500).json({ error: e.message });
     }
     if (!conversation) return res.status(404).json({ error: 'no such conversation' });
 
-    // 2. everything from here on carries the captured groups
-    const query = sparql => groupsQuery(sparql, conversation.groups);
-    const update = sparql => groupsUpdate(sparql, conversation.groups);
-
     let assistant, history, userMessage;
     try {
-      assistant = process.env.CHAT_ASSISTANT_URI || await findAssistant(query);
-      history = await readHistory(query, conversation.uri, assistant);
-      userMessage = await writeMessage(update, {
+      assistant = process.env.CHAT_ASSISTANT_URI || await findAssistant();
+      history = await readHistory(conversation.uri, assistant);
+      userMessage = await writeMessage({
         conversationUri: conversation.uri,
         content,
         maker: conversation.creator,
@@ -52,22 +49,24 @@ export function mountChat(app, { path = '/assistant', answer }) {
       return res.status(500).json({ error: e.message });
     }
 
-    // 3. answer now; the assistant's message comes when it comes
+    // 2. answer now; the assistant's message comes when it comes. The
+    // template's helpers keep attaching this request's session for the
+    // whole continuation, so the writes below stay the caller's;
+    // mu-authorization is in charge of what lands where.
     res.status(202).json({ id: userMessage.id });
 
     const turn = {
       conversation: { uri: conversation.uri, id: conversation.id, title: conversation.title },
       history,
       content,
-      query,
-      update,
-      groups: conversation.groups,
+      query: muQuery,
+      update: muUpdate,
       finished: false,
-      say: (text, attachments = []) => writeMessage(update, {
+      say: (text, attachments = []) => writeMessage({
         conversationUri: conversation.uri, content: text, maker: assistant, attachments,
       }),
-      setUrl: (documentUri, url) => setDocumentUrl(update, documentUri, url, conversation.uri),
-      drop: (documentUri) => dropDocument(update, documentUri),
+      setUrl: (documentUri, url) => setDocumentUrl(documentUri, url, conversation.uri),
+      drop: (documentUri) => dropDocument(documentUri),
     };
 
     try {

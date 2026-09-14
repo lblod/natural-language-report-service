@@ -1,11 +1,11 @@
 // Turn a shapes graph into the flat list an LLM reads well (plan §7.3). Not
 // Turtle: a plain text menu of entities, their fields and the code lists.
-// Code lists under INLINE_VALUES_MAX are inlined at boot from the public
-// graph (publicQuery) and refreshed every VALUES_TTL, so the LLM never has
-// to search the short ones.
+// Code lists under INLINE_VALUES_MAX are inlined at request time
+// (sessionQuery; mu-authorization decides what is visible) and refreshed
+// every VALUES_TTL, so the LLM never has to search the short ones.
 
 import { fieldsOf, entityForClass } from '../runner/profile.js';
-import { publicQuery } from '../db.js';
+import { sessionQuery } from '../db.js';
 
 const INLINE_VALUES_MAX = Number(process.env.INLINE_VALUES_MAX || 50);
 const VALUES_TTL = Number(process.env.VALUES_TTL || 3600) * 1000;
@@ -34,7 +34,7 @@ async function loadCodeList(profile, f, key) {
   try {
     values = await queryCodeList(f.class);
   } catch (e) {
-    // public graph read failed; report nothing, the LLM will use lookup_values
+    // the read failed; report nothing, the LLM will use lookup_values
     values = [];
   }
   cache.set(key, { values, at: Date.now() });
@@ -46,7 +46,7 @@ async function queryCodeList(type) {
     ?uri a <${type}> .
     OPTIONAL { ?uri <http://www.w3.org/2004/02/skos/core#prefLabel> ?label . }
   } ORDER BY ?label LIMIT ${INLINE_VALUES_MAX + 1}`;
-  const r = await publicQuery(q);
+  const r = await sessionQuery(q);
   const bindings = r.results.bindings;
   return bindings.slice(0, INLINE_VALUES_MAX).map(b => ({
     uri: b.uri.value,

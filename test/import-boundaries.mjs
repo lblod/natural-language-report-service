@@ -1,3 +1,6 @@
+// node --import ./dev-stubs/register.js <test file>
+// (this file itself needs no 'mu', so it runs without the register hook)
+//
 // The drop-in guarantee (plan step 1.1): src/chat/ imports nothing from the
 // rest of this service, and nothing there imports it back.
 import { readdirSync, readFileSync, statSync } from 'node:fs';

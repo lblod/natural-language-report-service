@@ -1,9 +1,7 @@
 // The eight MCP tools the LLM calls. Each maps to a runner/ function or a
-// pure profile/db read. Tools that touch session data (run_report,
-// report_status, export_spec) live here and call into runner/; they never
-// import sessionQuery themselves (CI check 2). What they return is always a
-// job URI, a status, a count, a link, column names or an error we wrote,
-// never a cell value (CI check 3, the §8 guarantee).
+// profile/db read. What they return is always a job URI, a status, a count,
+// a link, column names or an error we wrote, never a cell value (the §8
+// guarantee).
 //
 // The shape every tool returns is { content: [{ type: 'text', text }] } so the
 // loop can pass it straight back to the model.
@@ -19,10 +17,10 @@ const MAX_PATH_DEPTH = Number(process.env.MAX_PATH_DEPTH || 8);
 const RUN_TIMEOUT = Number(process.env.RUN_TIMEOUT || 60) * 1000;
 
 // buildTools(profiles, session) → { tools: Tool[], handlers: Map<name, fn> }
-// `session` is the request's { query, update, groups, capture } bundle the app
-// builds once per /mcp request. run_report captures the identity and runs in
-// the background exactly like POST /reports does, but waits up to
-// RUN_TIMEOUT so the LLM gets the result in one turn when it is quick.
+// `session` is the request's { query, update } bundle: the template's own
+// helpers, which attach the caller's session from the request context.
+// run_report starts the run and waits up to RUN_TIMEOUT so the LLM gets the
+// result in one turn when it is quick.
 
 export function buildTools(profiles, session) {
   const profileList = () => [...profiles.values()].map(p => ({ id: p.uri, title: p.title }));
@@ -77,11 +75,10 @@ export function buildTools(profiles, session) {
     const errors = checkSpec(parsed, p, MAX_PATH_DEPTH, profiles);
     if (errors.length) return text(`the spec is not valid: ${errors[0]}`);
     try {
-      const g = await session.groups;
       // The spec's own dct:title names the report; there is no other input.
       const name = parsed.title || 'report';
       await session.onReportStart?.({ title: name, fileName: `${slug(name)}.csv` });
-      const running = run(g, parsed, p, name);
+      const running = run(session.query, session.update, parsed, p, name);
       // The end callback fires even when withTimeout below has given up: the
       // run is not cancelled, and the file arrives when it arrives. The
       // rejection handler also keeps a late failure from crashing Node 20.

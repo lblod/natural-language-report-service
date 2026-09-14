@@ -1,4 +1,5 @@
 import { app } from 'mu';
+import express from 'express';
 import { loadProfiles } from './src/runner/profile.js';
 import { buildSession, stripStoreError } from './src/db.js';
 import { ask } from './src/llm/loop.js';
@@ -34,7 +35,9 @@ mountChat(app, { path: '/assistant', answer: reportAssistant(whenProfiles) });
 // validate and repair it, run the report) and the answer in Dutch comes back
 // with a trace of the tool calls. Follow-ups carry the earlier turns in
 // `history`; the conversation lives on the caller's side.
-app.post('/ask', async (req, res) => {
+// The template parses application/vnd.api+json only; the question comes as
+// plain JSON, so the route parses it itself, like the chat route does.
+app.post('/ask', express.json(), async (req, res) => {
   const { question, history } = req.body || {};
   if (!question) return res.status(400).json({ error: 'no question in the request body' });
   if (!process.env.LLM_BASE_URL) return res.status(503).json({ error: 'no LLM configured (set LLM_BASE_URL)' });

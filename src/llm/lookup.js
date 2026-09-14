@@ -1,9 +1,10 @@
-// lookup_values: search a code list too long to inline. One publicQuery,
-// regex on str(?label) so language-tagged labels still match. Returns the
-// matches, the total, and an `exact` flag when a label equals the term (case
-// aside) so the LLM can settle disambiguation on its own.
+// lookup_values: search a code list too long to inline. One query through
+// the template helper, regex on str(?label) so language-tagged labels still
+// match. Returns the matches, the total, and an `exact` flag when a label
+// equals the term (case aside) so the LLM can settle disambiguation on its
+// own.
 
-import { publicQuery, sparqlEscapeString } from '../db.js';
+import { sessionQuery, sparqlEscapeString } from '../db.js';
 import { fieldsOf, entityForClass } from '../runner/profile.js';
 
 const LIMIT = 25;
@@ -18,7 +19,7 @@ export async function lookupValues(profile, term, fieldSpec) {
     ?uri <http://www.w3.org/2004/02/skos/core#prefLabel> ?label ; a ?type .
     FILTER(REGEX(str(?label), ${sparqlEscapeString(escapeRegex(term))}, "i"))
   } ORDER BY ?label LIMIT ${LIMIT * 8}`;
-  const r = await publicQuery(q);
+  const r = await sessionQuery(q);
   const bindings = r.results.bindings;
   // The profile's sh:class is the type the data should carry, but code lists
   // sometimes type their entries differently (MAR codes are
@@ -59,7 +60,7 @@ async function codeQuery(profile, type, term) {
     FILTER(CONTAINS(LCASE(str(?code)), LCASE(${sparqlEscapeString(term)})))
   } ORDER BY ?label LIMIT ${LIMIT}`;
   try {
-    const r = await publicQuery(q);
+    const r = await sessionQuery(q);
     return r.results.bindings.map(b => ({ label: b.label.value, uri: b.uri.value }));
   } catch {
     return [];

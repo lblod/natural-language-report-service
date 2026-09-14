@@ -2,22 +2,10 @@
 // service it lives in. Full URIs everywhere: the auth layer rejects a prefixed
 // name with no PREFIX line with an opaque 500.
 import { randomUUID } from 'crypto';
-import { sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime } from 'mu';
+import { query as muQuery, update as muUpdate,
+         sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime } from 'mu';
 
-const ENDPOINT = process.env.MU_SPARQL_ENDPOINT;
 const HISTORY_LIMIT = Number(process.env.CHAT_HISTORY_LIMIT || 20);
-
-// The mu template logs mu.query/mu.update the same way (helpers/mu/sparql.js);
-// these fetch paths bypass it, so log here under the same switches.
-const LOG_QUERIES = process.env.LOG_SPARQL_QUERIES != undefined
-  ? /^(true|1)$/i.test(process.env.LOG_SPARQL_QUERIES)
-  : /^(true|1)$/i.test(process.env.LOG_SPARQL_ALL || '');
-const LOG_UPDATES = process.env.LOG_SPARQL_UPDATES != undefined
-  ? /^(true|1)$/i.test(process.env.LOG_SPARQL_UPDATES)
-  : /^(true|1)$/i.test(process.env.LOG_SPARQL_ALL || '');
-function logSparql(kind, sparql) {
-  console.log(`[sparql] ${kind}:\n${sparql}`);
-}
 
 const T = {
   type: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type',
@@ -48,77 +36,29 @@ const s = sparqlEscapeString;
 const dt = (value) => sparqlEscapeDateTime(value)
   .replace('xsd:dateTime', '<http://www.w3.org/2001/XMLSchema#dateTime>');
 
-// --- the two ways to talk to the auth layer ---------------------------------
-
-// With the caller's session, inside the request. Returns the JSON result and
-// the allowed-groups header, which is the identity we carry past the 202.
-// A bare fetch rather than mu.query: the header is on the response, and this
-// way we do not depend on what the template's helper chooses to return.
-export async function sessionQuery(sparql, sessionId) {
-  if (LOG_QUERIES) logSparql('query', sparql);
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/sparql-results+json',
-      'mu-session-id': sessionId,
-    },
-    body: new URLSearchParams({ query: sparql }).toString(),
-  });
-  if (!res.ok) throw new Error(`query failed (${res.status}): ${firstLine(await res.text())}`);
-  return { json: await res.json(), groups: res.headers.get('mu-auth-allowed-groups') };
-}
-
-// With the captured groups, after the 202.
-export async function groupsQuery(sparql, groups) {
-  if (LOG_QUERIES) logSparql('query', sparql);
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/sparql-results+json',
-      'mu-auth-allowed-groups': groups,
-    },
-    body: new URLSearchParams({ query: sparql }).toString(),
-  });
-  if (!res.ok) throw new Error(`query failed (${res.status}): ${firstLine(await res.text())}`);
-  return res.json();
-}
-
-export async function groupsUpdate(sparql, groups) {
-  if (LOG_UPDATES) logSparql('update', sparql);
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/sparql-update', 'mu-auth-allowed-groups': groups },
-    body: sparql,
-  });
-  if (!res.ok) throw new Error(`update failed (${res.status}): ${firstLine(await res.text())}`);
-}
-
-function firstLine(text) { return String(text).split('\n')[0].slice(0, 300); }
 const bindings = (json) => json.results.bindings;
 
 // --- reads --------------------------------------------------------------------
 
-// The conversation by uuid, as the caller sees it. null when not readable.
-// Also returns the allowed groups from the same round trip.
-export async function readConversation(id, sessionId) {
-  const { json, groups } = await sessionQuery(`
+// The conversation by uuid, as the caller sees it (the query carries the
+// caller's session; the auth layer answers with what they may read).
+// null when not readable.
+export async function readConversation(id) {
+  const json = await muQuery(`
     SELECT ?conversation ?title ?creator WHERE {
       ?conversation ${u(T.type)} ${u(T.thread)} ;
         ${u(T.uuid)} ${s(id)} .
       OPTIONAL { ?conversation ${u(T.title)} ?title . }
       OPTIONAL { ?conversation ${u(T.maker)} ?creator . }
-    } LIMIT 1`, sessionId);
+    } LIMIT 1`);
   const b = bindings(json)[0];
   if (!b) return null;
-  if (!groups) throw new Error('no mu-auth-allowed-groups header on the conversation read; cannot carry the identity past the 202');
-  return { uri: b.conversation.value, id, title: b.title?.value, creator: b.creator?.value, groups };
+  return { uri: b.conversation.value, id, title: b.title?.value, creator: b.creator?.value };
 }
 
 // The last HISTORY_LIMIT messages, oldest first, as { role, content }.
-export async function readHistory(queryFn, conversationUri, assistantUri) {
-  const json = await queryFn(`
+export async function readHistory(conversationUri, assistantUri) {
+  const json = await muQuery(`
     SELECT ?content ?maker ?created WHERE {
       ?message ${u(T.hasContainer)} ${u(conversationUri)} ;
         ${u(T.content)} ?content ;
@@ -132,8 +72,8 @@ export async function readHistory(queryFn, conversationUri, assistantUri) {
 }
 
 // The one assistant the caller can read. Throws unless there is exactly one.
-export async function findAssistant(queryFn) {
-  const json = await queryFn(`
+export async function findAssistant() {
+  const json = await muQuery(`
     SELECT ?agent WHERE { ?agent ${u(T.type)} ${u(T.softwareAgent)} . } LIMIT 2`);
   const rows = bindings(json);
   if (rows.length !== 1) {
@@ -147,7 +87,7 @@ export async function findAssistant(queryFn) {
 // One message, both types, its attachments, and the conversation touched, in
 // one update. `title` is only written when given (the first question names
 // an unnamed conversation). Returns { uri, id, documents: [{ uri, id }] }.
-export async function writeMessage(updateFn, { conversationUri, content, maker, attachments = [], title }) {
+export async function writeMessage({ conversationUri, content, maker, attachments = [], title }) {
   const id = randomUUID();
   const uri = `${MESSAGE_BASE}${id}`;
   const now = dt(new Date());
@@ -171,7 +111,7 @@ export async function writeMessage(updateFn, { conversationUri, content, maker, 
   const conversationPairs = [`${u(T.lastActivity)} ${now}`];
   if (title) conversationPairs.push(`${u(T.title)} ${s(title)}`);
 
-  await updateFn(`
+  await muUpdate(`
     DELETE {
       ${u(conversationUri)} ${u(T.lastActivity)} ?old .
     }
@@ -195,9 +135,9 @@ export async function writeMessage(updateFn, { conversationUri, content, maker, 
 }
 
 // The file is ready.
-export async function setDocumentUrl(updateFn, documentUri, url, conversationUri) {
+export async function setDocumentUrl(documentUri, url, conversationUri) {
   const now = dt(new Date());
-  await updateFn(`
+  await muUpdate(`
     DELETE {
       ${u(documentUri)} ${u(T.url)} ?oldUrl .
       ${u(conversationUri)} ${u(T.lastActivity)} ?old .
@@ -213,8 +153,8 @@ export async function setDocumentUrl(updateFn, documentUri, url, conversationUri
 }
 
 // The file failed. The card disappears; the caller says why in a message.
-export async function dropDocument(updateFn, documentUri) {
-  await updateFn(`
+export async function dropDocument(documentUri) {
+  await muUpdate(`
     DELETE {
       ?message ${u(T.attachment)} ${u(documentUri)} .
       ${u(documentUri)} ?p ?o .

@@ -19,7 +19,7 @@ export function reportAssistant(whenProfiles) {
 
     const session = {
       query: turn.query,
-      groups: turn.groups,
+      update: turn.update,
       async onReportStart({ fileName }) {
         const said = await turn.say(TEXT.making, [{ name: fileName, mediaType: 'text/csv' }]);
         pendingDocument = said.documents[0].uri;
