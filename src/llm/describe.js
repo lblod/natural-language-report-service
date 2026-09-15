@@ -3,7 +3,6 @@
 // never has to search the short ones.
 
 import { fieldsOf, entityForClass } from '../runner/profile.js';
-import { sessionQuery } from '../db.js';
 
 const INLINE_VALUES_MAX = Number(process.env.INLINE_VALUES_MAX || 50);
 const VALUES_TTL = Number(process.env.VALUES_TTL || 3600) * 1000;
@@ -11,26 +10,28 @@ const VALUES_TTL = Number(process.env.VALUES_TTL || 3600) * 1000;
 // In-memory cache: profile+field → { values, at }. Refreshed lazily when stale.
 const cache = new Map();
 
-export async function codeListValues(profile) {
-  // Returns a map: "shapeUri|predicate|inverse" → [{ uri, label }]
+// codeListValues(profile, queryFn) → map "shapeUri|predicate|inverse"
+// → [{ uri, label }]. queryFn runs under the service scope (public graph), so
+// code lists read the same regardless of the caller's rights.
+export async function codeListValues(profile, queryFn) {
   const out = {};
   for (const shape of profile.shapes) {
     for (const f of shape.fields) {
       if (!f.class) continue;
       const key = `${shape.uri}|${f.path}|${f.inverse ? 1 : 0}`;
-      out[key] = await loadCodeList(profile, f, key);
+      out[key] = await loadCodeList(f, key, queryFn);
     }
   }
   return out;
 }
 
-async function loadCodeList(profile, f, key) {
+async function loadCodeList(f, key, queryFn) {
   if (!f.class) return [];
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < VALUES_TTL) return hit.values;
   let values = [];
   try {
-    values = await queryCodeList(f.class);
+    values = await queryCodeList(f.class, queryFn);
   } catch (e) {
     // the read failed; report nothing, the LLM will use rep:anyOf with words
     values = [];
@@ -39,12 +40,12 @@ async function loadCodeList(profile, f, key) {
   return values;
 }
 
-async function queryCodeList(type) {
+async function queryCodeList(type, queryFn) {
   const q = `SELECT ?uri ?label WHERE {
     ?uri a <${type}> .
     OPTIONAL { ?uri <http://www.w3.org/2004/02/skos/core#prefLabel> ?label . }
   } ORDER BY ?label LIMIT ${INLINE_VALUES_MAX + 1}`;
-  const r = await sessionQuery(q);
+  const r = await queryFn(q);
   const bindings = r.results.bindings;
   return bindings.slice(0, INLINE_VALUES_MAX).map(b => ({
     uri: b.uri.value,

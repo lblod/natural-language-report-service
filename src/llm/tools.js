@@ -1,24 +1,27 @@
-// The tools the LLM calls: list_profiles, describe_profile, validate_spec,
-// run_report. They return a report URI, a count, or an error we wrote —
-// never a cell value. The shape every tool returns is
-// { content: [{ type: 'text', text }] }, which the loop passes straight back
-// to the model.
+// The tools the LLM calls. Two modes:
+// - refine: list_profiles, describe_profile, validate_spec, lookup_values.
+//   lookup_values searches a code list under the service scope (public
+//   graph) and returns candidate values, so the LLM can suggest concrete
+//   filter values. No report is created, no spec is evaluated.
+// - execute: list_profiles, describe_profile, validate_spec, run_report.
+//   run_report runs as the caller and returns only counts and URIs; no cell
+//   value ever reaches the model.
+//
+// The shape every tool returns is { content: [{ type: 'text', text }] },
+// which the loop passes straight back to the model.
 
 import { checkSpec } from '../runner/check.js';
 import { parseSpec } from '../runner/spec.js';
 import { describeProfile, codeListValues } from './describe.js';
+import { lookupValues } from './lookup.js';
 import { run, slug } from '../runner/run.js';
+import { scopedQuery } from '../db.js';
 
 const MAX_PATH_DEPTH = Number(process.env.MAX_PATH_DEPTH || 8);
 const RUN_TIMEOUT = Number(process.env.RUN_TIMEOUT || 60) * 1000;
 
-// buildTools(profiles, session) → { handlers }
-// run_report waits while the run keeps answering: every query that comes
-// back (a seed page, a column batch) restarts the RUN_TIMEOUT clock, and
-// only that much silence gives up. The batch count is known upfront — the
-// subject list is complete after the seed — so a slow run with many small
-// batches finishes, however long it takes in total.
-export function buildTools(profiles, session) {
+// buildTools(profiles, session, mode) → { handlers }
+export function buildTools(profiles, session, mode = 'refine') {
   const profileList = () => [...profiles.values()].map(p => ({ id: p.uri, title: p.title }));
 
   const findProfile = (id) => profiles.get(id);
@@ -26,7 +29,7 @@ export function buildTools(profiles, session) {
   async function describe_profile({ profile_id }) {
     const p = findProfile(profile_id);
     if (!p) return text(`no profile <${profile_id}>. Available: ${profileList().map(x => x.title).join(', ')}.`);
-    const inlined = await codeListValues(p, profiles);
+    const inlined = await codeListValues(p, scopedQuery);
     return text(describeProfile(p, inlined));
   }
 
@@ -42,6 +45,23 @@ export function buildTools(profiles, session) {
 
   async function list_profiles() {
     return text(profileList().map(x => `${x.title}  <${x.id}>`).join('\n'));
+  }
+
+  async function lookup_values({ profile_id, field, term }) {
+    const p = findProfile(profile_id);
+    if (!p) return text(`no profile <${profile_id}>. Available: ${profileList().map(x => x.title).join(', ')}.`);
+    if (!term) return text('no term to search for.');
+    try {
+      const out = await lookupValues(p, term, field, scopedQuery);
+      if (out.error) return text(out.error);
+      if (!out.matches.length) return text(`no value matches "${term}" in ${field}.`);
+      const lines = out.matches.map(m => `${m.label}  <${m.uri}>`);
+      if (out.total === '25+') lines.push('(25+ matches, narrow the term)');
+      if (out.exact) lines.push(`exact: <${out.exact}>`);
+      return text(lines.join('\n'));
+    } catch (e) {
+      return text(`the lookup failed: ${String(e.message || e).split('\n')[0]}`);
+    }
   }
 
   async function run_report({ spec }) {
@@ -71,12 +91,21 @@ export function buildTools(profiles, session) {
     }
   }
 
-  const handlers = new Map([
-    ['list_profiles', list_profiles],
-    ['describe_profile', describe_profile],
-    ['validate_spec', validate_spec],
-    ['run_report', run_report],
-  ]);
+  const handlers = new Map(
+    mode === 'execute'
+      ? [
+        ['list_profiles', list_profiles],
+        ['describe_profile', describe_profile],
+        ['validate_spec', validate_spec],
+        ['run_report', run_report],
+      ]
+      : [
+        ['list_profiles', list_profiles],
+        ['describe_profile', describe_profile],
+        ['validate_spec', validate_spec],
+        ['lookup_values', lookup_values],
+      ],
+  );
 
   return { handlers };
 }

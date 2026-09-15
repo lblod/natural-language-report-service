@@ -7,6 +7,32 @@ writes a CSV. The LLM writes no SPARQL and sees no report data.
 Ad-hoc reports only. The scheduled reports stay in
 `loket-report-generation-service`.
 
+## Two modes: refine, then execute
+
+Every turn is classified first. One small LLM call (`src/llm/mode.js`)
+returns true/false: does the user's last message clearly say "run it now" or
+not. The answer picks one of two deterministic code paths.
+
+**Refinement (Modus A).** The LLM proposes a spec and explains in Dutch what
+it will list and filter. It may call `lookup_values` to search code lists for
+candidate values, so its filter suggestions name real values instead of
+guesses. It never runs a report and never learns what a spec would match: the
+database it reads may differ from the one the report runs on, so a lookup is
+a suggestion, not a check. The user must confirm before anything executes.
+As long as the user has not given a clear command, the turn stays in this
+mode.
+
+**Execution (Modus B).** The user has confirmed. The LLM writes the agreed
+spec, validates it and calls `run_report` once, then stops. `run_report`
+returns only the report URI, the row count and the file URI. No cell value
+ever reaches the model; the service may count results, but no data is fed
+to the LLM.
+
+The two modes share `list_profiles`, `describe_profile` and `validate_spec`.
+Refinement adds `lookup_values`; execution adds `run_report`. The tool set is
+the only thing that differs; the code path from the classifier's answer is
+deterministic.
+
 ## How it works
 
 Two documents drive everything:
@@ -41,6 +67,22 @@ the caller's.
 The tools the LLM calls return URIs, counts, statuses and column names —
 never a cell value.
 
+### The service scope
+
+The LLM's own reads during refinement (`describe_profile`'s code lists and
+`lookup_values`) run under a service scope, not the caller's session. mu's
+`query(q, { scope })` sends `mu-auth-scope`; the sparql-parser config grants
+that scope read access to `http://mu.semte.ch/graphs/public` only. So
+refinement reads only public code lists, regardless of who calls. Execution
+(`run_report`) still runs as the caller, so the report contains what they may
+see, and the LLM sees none of it.
+
+The scope URI is `SERVICE_SCOPE` (default
+`http://services.semantic.works/natural-language-report`) and must match the
+`with-scope` grant in the app's sparql-parser `config.lisp`. Do not set
+`DEFAULT_MU_AUTH_SCOPE` on the service: that would scope every query
+(including the run and the chat store) and break them.
+
 ## Two endpoints
 
 ```
@@ -48,12 +90,13 @@ POST /ask                                     { question, history? } → { answe
 POST /assistant/conversations/:id/turns      { content }           → 202 { id }
 ```
 
-`/ask` is synchronous: a Dutch question in, the agent loop runs inside the
-service (profiles, lookups, spec, validate, repair, run), and the answer in
-Dutch comes back with a trace of the tool calls. The CSV lands in
-`data/files/`. `history` carries the earlier turns for follow-ups; the
-conversation lives on the caller's side, the service stores nothing. One
-question makes one report; the loop stops after `run_report`.
+`/ask` is synchronous: a Dutch question in, the turn is classified, and the
+matching mode's loop runs inside the service (profiles, spec, validate,
+refine or run), and the answer in Dutch comes back with a trace of the tool
+calls. The CSV lands in `data/files/`. `history` carries the earlier turns
+for follow-ups; the conversation lives on the caller's side, the service
+stores nothing. One question makes one report; the execution loop stops
+after `run_report`.
 
 `/assistant` is the chat. The turn module in
 `src/chat/` is generic — it imports nothing from `src/llm/` or `src/runner/`
@@ -70,10 +113,11 @@ run takes minutes.
 
 ### The internal tools
 
-The loop drives four tool handlers (`src/llm/tools.js`): `list_profiles`,
-`describe_profile`, `validate_spec`, `run_report`. They are machinery, not an
+The loop drives a tool set per mode (`src/llm/tools.js`). Both modes share
+`list_profiles`, `describe_profile`, `validate_spec`. Refinement adds
+`lookup_values`; execution adds `run_report`. They are machinery, not an
 external surface — the tool trace in the answer is the only thing a caller
-sees of them. All LLM-facing text (system prompt, profile menu, tool
+sees of them. All LLM-facing text (system prompts, profile menu, tool
 descriptions, validator errors) is English; the answer the user sees is Dutch.
 
 ## Environment
@@ -97,6 +141,7 @@ descriptions, validator errors) is English; the answer the user sees is Dutch.
 | `SHARE_DIR` | `/share` | where CSVs are written |
 | `CHAT_ASSISTANT_URI` | — | the `prov:SoftwareAgent` that signs assistant messages; found by lookup when unset |
 | `CHAT_HISTORY_LIMIT` | `20` | messages of history a turn reads |
+| `SERVICE_SCOPE` | `http://services.semantic.works/natural-language-report` | the mu-auth-scope for the LLM's own reads (code lists, `lookup_values`). Must match the `with-scope` grant in the app's sparql-parser config. |
 
 Do not set `ALLOW_MU_AUTH_SUDO`; the template then refuses sudo queries.
 
