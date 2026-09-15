@@ -44,7 +44,7 @@ export async function registerReport(sessionUpdateFn, title, fileUri, extra = {}
 
   const extraTriples = [];
   if (extra.question) extraTriples.push(`${sparqlEscapeUri(reportUri)} ${sparqlEscapeUri('http://mu.semte.ch/vocabularies/ext/question')} ${sparqlEscapeString(extra.question)} .`);
-  if (extra.spec) extraTriples.push(`${sparqlEscapeUri(reportUri)} ${sparqlEscapeUri('http://mu.semte.ch/vocabularies/ext/spec')} ${sparqlEscapeString(extra.spec)} .`);
+  if (extra.specFile) extraTriples.push(`${sparqlEscapeUri(reportUri)} ${sparqlEscapeUri('http://mu.semte.ch/vocabularies/ext/specFile')} ${sparqlEscapeString(extra.specFile)} .`);
   if (extra.creator) extraTriples.push(`${sparqlEscapeUri(reportUri)} ${sparqlEscapeUri('http://purl.org/dc/terms/creator')} ${sparqlEscapeUri(extra.creator)} .`);
 
   await (sessionUpdateFn || sessionUpdate)(`

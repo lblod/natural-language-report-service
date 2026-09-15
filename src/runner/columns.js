@@ -5,16 +5,22 @@ import { sparqlEscapeUri } from '../db.js';
 // before the leaf is identical, and the leaf is read the same way.
 // rep:self columns (empty path) are filled by assemble.js.
 
-const SUBJECT_CHUNK_SIZE = Number(process.env.SUBJECT_CHUNK_SIZE || 250);
+const SUBJECT_CHUNK_SIZE = Math.max(1, Number(process.env.SUBJECT_CHUNK_SIZE) || 100);
 
-export async function fetchColumns(sessionQuery, subjects, spec, values = new Map(), onChunk = null) {
+export async function fetchColumns(sessionQuery, subjects, spec, values = new Map(), onChunk = null, onProgress = null) {
   const groups = groupColumns(spec.columns);
-
+  // The subject list is complete and the chunk size is fixed, so the number
+  // of batch queries is known before the first one flies. onProgress fires
+  // after every answered batch with { done, total }.
+  const total = groups.length * Math.ceil(subjects.length / SUBJECT_CHUNK_SIZE);
+  let done = 0;
   for (const group of groups) {
     for (let i = 0; i < subjects.length; i += SUBJECT_CHUNK_SIZE) {
       const chunk = subjects.slice(i, i + SUBJECT_CHUNK_SIZE);
       const result = await sessionQuery(groupQuery(group, chunk));
       collect(result, group, values);
+      done += 1;
+      onProgress?.({ done, total });
     }
     if (onChunk) await onChunk(group);
   }

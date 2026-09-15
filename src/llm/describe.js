@@ -70,6 +70,7 @@ export function describeProfile(profile, codeLists = {}) {
   lines.push('');
   lines.push('sh:targetClass is de volledige URI tussen haakjes achter de entiteit hieronder.');
   lines.push('Gebruik in sh:path de predicate-URI die achter elke veldnaam staat, niet de veldnaam zelf.');
+  lines.push('Een omgekeerde hop (het veld staat "(omgekeerd)" achter) schrijf je in de lijst als [ sh:inversePath <predicate> ] .');
   lines.push('Een datumfilter is sh:minInclusive of sh:maxInclusive met "jjjj-mm-dd"^^xsd:dateTime');
   lines.push('(kopieer ook het xsd-prefix hierboven niet: voeg @prefix xsd: <http://www.w3.org/2001/XMLSchema#> toe).');
   lines.push('');

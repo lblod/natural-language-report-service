@@ -1,10 +1,12 @@
 import { sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime, sparqlEscapeDate } from '../db.js';
 
 // Subject selection. One paged query per page; stops at ROW_LIMIT.
+// onPage(n) fires after every answered page with the subject count so far,
+// so a caller waiting on this run can tell a live one from a stalled one.
 const ROW_LIMIT = Number(process.env.ROW_LIMIT || 200000);
 const PAGE_SIZE = Number(process.env.SEED_PAGE_SIZE || 5000);
 
-export async function seed(sessionQuery, spec) {
+export async function seed(sessionQuery, spec, onPage = null) {
   const subjects = [];
   let offset = 0;
   for (;;) {
@@ -12,6 +14,7 @@ export async function seed(sessionQuery, spec) {
     const result = await sessionQuery(query);
     const rows = result.results.bindings.map(b => b.s.value);
     subjects.push(...rows);
+    onPage?.(subjects.length);
     if (subjects.length > ROW_LIMIT) {
       throw new Error(`the question matches more than ${ROW_LIMIT} subjects. Add a filter, for example a date range or a bestuurseenheid.`);
     }

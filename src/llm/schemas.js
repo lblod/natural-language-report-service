@@ -50,7 +50,7 @@ export function toolSchemas() {
     },
     {
       name: 'run_report',
-      description: 'Run a valid spec and return the report URI, the row count and the file URI. Runs as the caller, so it sees only what they may see. Waits up to RUN_TIMEOUT. The report is named by the dct:title in the spec.',
+      description: 'Run a valid spec and return the report URI, the row count and the file URI. Runs as the caller, so it sees only what they may see. Waits as long as the run keeps answering; gives up after RUN_TIMEOUT seconds of silence. The report is named by the dct:title in the spec.',
       inputSchema: {
         type: 'object',
         properties: { spec: { type: 'string' } },

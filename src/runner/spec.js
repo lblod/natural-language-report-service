@@ -90,8 +90,13 @@ function parsePath(store, pathQuad) {
   while (cur && cur.value !== RDF + 'nil') {
     const item = store.getQuads(cur, RDF + 'first', null)[0]?.object;
     if (!item) throw new Error('sh:path list is broken');
-    if (item.termType !== 'NamedNode') throw new Error('sh:path list items must be URIs');
-    hops.push({ predicate: item.value, inverse: false });
+    if (item.termType === 'BlankNode') {
+      const inv = store.getQuads(item, SH + 'inversePath', null)[0]?.object;
+      if (!inv) throw new Error('sh:path list items must be URIs or [ sh:inversePath <predicate> ]');
+      hops.push({ predicate: inv.value, inverse: true });
+    } else {
+      hops.push({ predicate: item.value, inverse: false });
+    }
     cur = store.getQuads(cur, RDF + 'rest', null)[0]?.object;
   }
   return hops;

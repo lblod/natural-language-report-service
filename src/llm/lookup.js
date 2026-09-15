@@ -13,29 +13,20 @@ export async function lookupValues(profile, term, fieldSpec) {
   const type = resolveClass(profile, fieldSpec);
   if (!type) return { total: 0, exact: null, matches: [], error: `field "${fieldSpec}" not found in profile "${profile.title}"` };
 
-  const q = `SELECT ?uri ?label ?type WHERE {
-    ?uri <http://www.w3.org/2004/02/skos/core#prefLabel> ?label ; a ?type .
-    FILTER(REGEX(str(?label), ${sparqlEscapeString(escapeRegex(term))}, "i"))
-  } ORDER BY ?label LIMIT ${LIMIT * 8}`;
-  const r = await sessionQuery(q);
-  const bindings = r.results.bindings;
-  // The profile's sh:class is the type the data should carry, but code lists
-  // sometimes type their entries differently (MAR codes are
-  // ext:supervision/Nomenclature, the profile says skos:Concept). Prefer rows
-  // matching the asked class, fall back to all rows. The query reads more
-  // rows than LIMIT so an exact hit deeper in the alphabet still surfaces.
-  const wanted = bindings.filter(b => type && b.type?.value === type);
-  const rows = wanted.length ? wanted : bindings;
+  // Search within the class first. A common word ("gemeente") also sits in
+  // hundreds of unrelated labels; an unscoped scan drowns the code.
+  let rows = await labelQuery(term, type);
+  // Code lists sometimes type their entries differently than the profile
+  // says (MAR codes are ext:supervision/Nomenclature, the profile says
+  // skos:Concept). Fall back to a scan over everything.
+  if (!rows.length) rows = await labelQuery(term, null);
   // Order: an exact label (case aside) first, then the rest as the store
   // ordered them. "Gent" must surface before "AGB Erfgoed Gent".
   const lower = term.toLowerCase();
-  const exactRow = rows.find(b => b.label.value.toLowerCase() === lower);
+  const exactRow = rows.find(b => b.label.toLowerCase() === lower);
   const rest = rows.filter(b => b !== exactRow);
   const ordered = exactRow ? [exactRow, ...rest] : rest;
-  let matches = ordered.slice(0, LIMIT).map(b => ({
-    label: b.label.value,
-    uri: b.uri.value,
-  }));
+  let matches = ordered.slice(0, LIMIT);
   if (!matches.length) {
     const byCode = await codeQuery(profile, type, term);
     matches = byCode;
@@ -46,6 +37,16 @@ export async function lookupValues(profile, term, fieldSpec) {
     exact: exact ? exact.uri : null,
     matches,
   };
+}
+
+async function labelQuery(term, type) {
+  const q = `SELECT DISTINCT ?uri ?label WHERE {
+    ?uri a ${type ? `<${type}>` : '?anyType'} ;
+         <http://www.w3.org/2004/02/skos/core#prefLabel> ?label .
+    FILTER(REGEX(str(?label), ${sparqlEscapeString(escapeRegex(term))}, "i"))
+  } ORDER BY ?label LIMIT ${LIMIT * 8}`;
+  const r = await sessionQuery(q);
+  return r.results.bindings.map(b => ({ label: b.label.value, uri: b.uri.value }));
 }
 
 // MAR codes: the label says "MAR7300 - …" but the searchable code sits on

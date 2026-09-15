@@ -84,17 +84,17 @@ sees of them.
 | `MU_SPARQL_ENDPOINT` | — | the auth layer, e.g. `http://database:8890/sparql`. Never virtuoso. |
 | `REPORT_CLASS` | `…/reporting/Report` | type of the report resource |
 | `CSV_SEPARATOR` | `;` | CSV column separator |
-| `SUBJECT_CHUNK_SIZE` | `250` | subjects per column query |
+| `SUBJECT_CHUNK_SIZE` | `100` | subjects per column query (VALUES batch size); lower it when the auth layer rejects long queries |
 | `ROW_LIMIT` | `200000` | seed limit; failing the job beats truncating |
 | `MAX_PATH_DEPTH` | `8` | longest allowed spec path |
-| `RUN_TIMEOUT` | `60` | seconds `run_report` waits before giving up. Full-org runs need 300. |
+| `RUN_TIMEOUT` | `60` | seconds of silence before `run_report` gives up. Every answered query (seed page, column batch) restarts the clock, so a big report only needs the window per batch, not for the whole run. The run itself is never cancelled: the file still lands in the chat. |
 | `INLINE_VALUES_MAX` | `50` | code lists up to this size are inlined in `describe_profile` |
 | `VALUES_TTL` | `3600` | seconds the inlined lists are cached |
 | `LLM_BASE_URL` | — | enables `/ask`; OpenAI-compatible (`https://ollama.com/v1`) |
 | `LLM_MODEL` | — | e.g. `gpt-oss:120b` |
 | `LLM_API_KEY` | — | bearer token, optional for local Ollama |
 | `SEED_PAGE_SIZE` | `5000` | seed page size |
-| `SUBJECT_CHUNK_SIZE` | `250` | see above |
+| `SUBJECT_CHUNK_SIZE` | `100` | see above |
 | `SHARE_DIR` | `/share` | where CSVs are written |
 | `CHAT_ASSISTANT_URI` | — | the `prov:SoftwareAgent` that signs assistant messages; found by lookup when unset |
 | `CHAT_HISTORY_LIMIT` | `20` | messages of history a turn reads |

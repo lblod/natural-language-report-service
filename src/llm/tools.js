@@ -9,12 +9,17 @@ import { seedPageQuery } from '../runner/seed.js';
 import { describeProfile, codeListValues } from './describe.js';
 import { run, slug } from '../runner/run.js';
 import { lookupValues } from './lookup.js';
+import { readSpec } from '../runner/csv.js';
 
 const MAX_PATH_DEPTH = Number(process.env.MAX_PATH_DEPTH || 8);
 const RUN_TIMEOUT = Number(process.env.RUN_TIMEOUT || 60) * 1000;
 
 // buildTools(profiles, session) → { handlers }
-// run_report waits up to RUN_TIMEOUT so a quick run returns in one turn.
+// run_report waits while the run keeps answering: every query that comes
+// back (a seed page, a column batch) restarts the RUN_TIMEOUT clock, and
+// only that much silence gives up. The batch count is known upfront — the
+// subject list is complete after the seed — so a slow run with many small
+// batches finishes, however long it takes in total.
 export function buildTools(profiles, session) {
   const profileList = () => [...profiles.values()].map(p => ({ id: p.uri, title: p.title }));
 
@@ -71,14 +76,15 @@ export function buildTools(profiles, session) {
       // The spec's dct:title names the report.
       const name = parsed.title || 'report';
       await session.onReportStart?.({ title: name, fileName: `${slug(name)}.csv` });
-      const running = run(session.query, session.update, parsed, p, name);
-      // The end callback also fires after the timeout gave up: the run is not
+      const waiter = newRunWaiter(RUN_TIMEOUT);
+      const running = run(session.query, session.update, parsed, p, name, null, { spec }, waiter.tick);
+      // The end callback also fires after the wait gave up: the run is not
       // cancelled, the file arrives when it arrives. The .catch keeps a late
       // failure from crashing the process.
       running
         .then((r) => session.onReportEnd?.(null, r), (e) => session.onReportEnd?.(e))
         .catch((e) => console.error('[reports] end callback failed:', e));
-      const result = await withTimeout(running, RUN_TIMEOUT);
+      const result = await waiter.finish(running);
       return text(`done. report <${result.reportUri}>, ${result.rowCount} rows, file <${result.fileUri}>.`);
     } catch (e) {
       return text(`the report failed: ${String(e.message || e).split('\n')[0]}`);
@@ -103,9 +109,14 @@ export function buildTools(profiles, session) {
 
   async function export_spec({ report_uri }) {
     const r = await session.query(
-      `SELECT ?spec WHERE { <${report_uri}> <http://mu.semte.ch/vocabularies/ext/spec> ?spec } LIMIT 1`);
+      `SELECT ?specFile WHERE { <${report_uri}> <http://mu.semte.ch/vocabularies/ext/specFile> ?specFile } LIMIT 1`);
     const b = r.results.bindings[0];
-    return text(b ? b.spec.value : `no spec stored on <${report_uri}>.`);
+    if (!b) return text(`no spec stored on <${report_uri}>.`);
+    try {
+      return text(readSpec(b.specFile.value));
+    } catch {
+      return text(`the spec file ${b.specFile.value} is not on disk anymore.`);
+    }
   }
 
   const handlers = new Map([
@@ -129,6 +140,31 @@ function buildQueriesText(spec, profile) {
   return ['-- seed query', seed, ''].join('\n');
 }
 
-function withTimeout(p, ms) {
-  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`report took longer than ${ms / 1000}s`)), ms))]);
+// Waits for a report run while it makes progress. tick restarts the silence
+// clock; idleMs without a single tick rejects. The run is never cancelled:
+// finish's handlers only pass its own settlement on, so a run that answers
+// after the wait gave up still delivers through the end callback.
+function newRunWaiter(idleMs) {
+  let deferred;
+  const promise = new Promise((resolve, reject) => { deferred = { resolve, reject }; });
+  let settled = false;
+  let timer = setTimeout(fail, idleMs);
+  function fail() {
+    if (settled) return;
+    settled = true;
+    deferred.reject(new Error(`no query answered for ${idleMs / 1000}s`));
+  }
+  return {
+    tick() {
+      if (settled) return;
+      clearTimeout(timer);
+      timer = setTimeout(fail, idleMs);
+    },
+    finish(running) {
+      running.then(
+        (r) => { settled = true; clearTimeout(timer); deferred.resolve(r); },
+        (e) => { settled = true; clearTimeout(timer); deferred.reject(e); });
+      return promise;
+    },
+  };
 }
