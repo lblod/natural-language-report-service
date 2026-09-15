@@ -4,7 +4,7 @@
 
 import { buildTools } from './tools.js';
 
-const MAX_REPAIR_ROUNDS = Number(process.env.MAX_REPAIR_ROUNDS || 3);
+const MAX_ROUNDS = Number(process.env.MAX_ROUNDS || 12);
 const LLM_BASE_URL = process.env.LLM_BASE_URL;
 const LLM_MODEL = process.env.LLM_MODEL;
 const LLM_API_KEY = process.env.LLM_API_KEY;
@@ -17,21 +17,22 @@ The profile lists what can be asked. Compose paths by chaining fields.
 
 Rules:
 - A column must end on a value, not on a link. Chain one more hop.
+- When two entities share one sh:targetClass, the spec also needs rep:entity
+  with that entity's URI; describe_profile shows it after each entity.
 - Filters go in sh:property. Columns go in rep:columns, in the order you want.
 - To match a topic rather than a value, list the Dutch words and compounds you
   would expect and put them all in rep:anyOf.
-- If a lookup returns nothing, or more than one plausible match, ask the user
-  in Dutch, offering labels. Never guess and never show a URI.
 - You cannot count, sort, take the first N, or compare two subjects. Say so.
 - The report's title is the dct:title you write in the spec. There is no other
   title input.
-- One conversation may ask for several reports, one run_report per report.
+- One question makes one report. Write one spec, validate it, run it, then stop.
+  Do not write a second report for the same question.
 
 Always prefix the spec with @prefix lines. Use the prefixes the profile declares.
 Write the spec as one Turtle block. Then call validate_spec. Fix what it says,
-up to three rounds. Then call run_report.
+up to three rounds. Then call run_report. After run_report returns, stop.
 
-Earlier turns are context only. Answer the last one.`;
+Reply to the user in Dutch. Earlier turns are context only. Answer the last one.`;
 
 // ask(questionOrMessages, profiles, session) → { text, trace }
 // A string is one question; an array is the conversation so far,
@@ -46,7 +47,7 @@ export async function ask(questionOrMessages, profiles, session) {
     : questionOrMessages.filter(m => m.role !== 'system');
   const messages = [{ role: 'system', content: SYSTEM_PROMPT }, ...turns];
 
-  for (let round = 0; round < 12; round++) {
+  for (let round = 0; round < MAX_ROUNDS; round++) {
     const reply = await chat(messages);
     messages.push(reply.message);
     const calls = reply.message.tool_calls || [];
@@ -121,15 +122,6 @@ async function chat(messages) {
 function parseArgs(s) {
   if (!s) return {};
   try { return JSON.parse(s); } catch { return {}; }
-}
-
-// messagesFor(question) — a fresh conversation: system prompt plus the user
-// question.
-export function messagesFor(question) {
-  return [
-    { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: question },
-  ];
 }
 
 // The tool definitions sent to the model.

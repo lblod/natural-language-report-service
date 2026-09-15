@@ -7,7 +7,7 @@ import { sparqlEscapeUri } from '../db.js';
 
 const SUBJECT_CHUNK_SIZE = Math.max(1, Number(process.env.SUBJECT_CHUNK_SIZE) || 100);
 
-export async function fetchColumns(sessionQuery, subjects, spec, values = new Map(), onChunk = null, onProgress = null) {
+export async function fetchColumns(sessionQuery, subjects, spec, values = new Map(), onProgress = null) {
   const groups = groupColumns(spec.columns);
   // The subject list is complete and the chunk size is fixed, so the number
   // of batch queries is known before the first one flies. onProgress fires
@@ -22,7 +22,6 @@ export async function fetchColumns(sessionQuery, subjects, spec, values = new Ma
       done += 1;
       onProgress?.({ done, total });
     }
-    if (onChunk) await onChunk(group);
   }
   return values;
 }

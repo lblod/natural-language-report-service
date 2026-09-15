@@ -6,11 +6,11 @@ import { sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime, sparqlEscape
 const ROW_LIMIT = Number(process.env.ROW_LIMIT || 200000);
 const PAGE_SIZE = Number(process.env.SEED_PAGE_SIZE || 5000);
 
-export async function seed(sessionQuery, spec, onPage = null) {
+export async function seed(sessionQuery, spec, shape = null, onPage = null) {
   const subjects = [];
   let offset = 0;
   for (;;) {
-    const query = seedPageQuery(spec, PAGE_SIZE, offset);
+    const query = seedPageQuery(spec, PAGE_SIZE, offset, shape);
     const result = await sessionQuery(query);
     const rows = result.results.bindings.map(b => b.s.value);
     subjects.push(...rows);
@@ -24,9 +24,11 @@ export async function seed(sessionQuery, spec, onPage = null) {
   return subjects;
 }
 
-export function seedPageQuery(spec, limit, offset) {
+export function seedPageQuery(spec, limit, offset, shape = null) {
   const parts = [];
-  parts.push(`?s a ${sparqlEscapeUri(spec.targetClass)} .`);
+  const targetClass = spec.targetClass || shape?.targetClass;
+  parts.push(`?s a ${sparqlEscapeUri(targetClass)} .`);
+  if (shape?.discriminator) parts.push(discriminatorPattern(shape.discriminator));
   spec.filters.forEach((filter, fi) => {
     parts.push(hopsPattern(filter.path, `f${fi}`, '?s'));
     parts.push(constraintsPattern(filter.constraints, `f${fi}`));
@@ -35,6 +37,16 @@ export function seedPageQuery(spec, limit, offset) {
   ${parts.join('\n  ')}
 }
 LIMIT ${limit} OFFSET ${offset}`;
+}
+
+// A shape that shares its class with another says here what sets its
+// subjects apart: sh:minCount 1 is a plain triple, sh:maxCount 0 a NOT EXISTS.
+function discriminatorPattern(d) {
+  const p = sparqlEscapeUri(d.path);
+  const triple = d.inverse ? `?disc ${p} ?s .` : `?s ${p} ?disc .`;
+  if (d.minCount !== null && d.minCount >= 1) return triple;
+  if (d.maxCount === 0) return `FILTER NOT EXISTS { ${triple} }`;
+  return null;
 }
 
 // Writes out every hop as its own triple pattern.

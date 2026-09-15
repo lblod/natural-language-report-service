@@ -1,4 +1,4 @@
-import { entityForClass, fieldsOf } from './profile.js';
+import { fieldsOf } from './profile.js';
 import { NUMERIC_DATATYPES } from './assemble.js';
 
 const SH = 'http://www.w3.org/ns/shacl#';
@@ -27,19 +27,44 @@ function profileNamed(spec, knownProfiles) {
   return null;
 }
 
-// The target class is in the profile
-function targetClass(spec, profile) {
+// The spec names an entity we have: by rep:entity, or by a targetClass only
+// one entity carries. A class two entities share is refused with both names,
+// so the model can add rep:entity instead of guessing.
+function startEntity(spec, profile) {
   if (!spec.targetClass) {
     return `no sh:targetClass. In "${profile.title}" you can list: ${shapeList(profile)}.`;
   }
-  if (!entityForClass(profile, spec.targetClass)) {
+  if (spec.entity) {
+    const s = profile.shapes.find(x => x.uri === spec.entity);
+    if (!s) {
+      return `no entity <${spec.entity}> in "${profile.title}". It has: ${shapeList(profile)}.`;
+    }
+    if (s.targetClass !== spec.targetClass) {
+      return `rep:entity <${spec.entity}> is a <${s.targetClass}>, but sh:targetClass says <${spec.targetClass}>. Make them agree.`;
+    }
+    return null;
+  }
+  const matches = profile.shapes.filter(s => s.targetClass === spec.targetClass);
+  if (matches.length === 1) return null;
+  if (!matches.length) {
     return `"${profile.title}" cannot list <${spec.targetClass}>. It has: ${shapeList(profile)}.`;
   }
-  return null;
+  const names = matches.map(m => `${m.label || m.uri} <${m.uri}>`).join(', ');
+  return `<${spec.targetClass}> is the class of ${matches.length} entities: ${names}. Add rep:entity <...> to say which one.`;
 }
 
 function shapeList(profile) {
   return profile.shapes.map(s => s.label || s.targetClass).join(', ');
+}
+
+// The shape a spec starts from, after startEntity has approved it: rep:entity
+// wins, otherwise the one shape carrying the targetClass.
+function startShapeOf(spec, profile) {
+  if (spec.entity) {
+    return profile.shapes.find(s => s.uri === spec.entity)?.uri || null;
+  }
+  const matches = profile.shapes.filter(s => s.targetClass === spec.targetClass);
+  return matches.length === 1 ? matches[0].uri : null;
 }
 
 // Columns exist
@@ -70,7 +95,7 @@ function columnLabelsUnique(spec) {
 
 // Every path resolves, columns end on a value, depth capped
 function pathsResolve(spec, profile, maxPathDepth) {
-  const startShapeUri = entityForClass(profile, spec.targetClass);
+  const startShapeUri = startShapeOf(spec, profile);
   for (const col of spec.columns) {
     const err = walk(profile, startShapeUri, col.path, maxPathDepth,
       `column "${col.label}"`, true);
@@ -86,7 +111,7 @@ function pathsResolve(spec, profile, maxPathDepth) {
 
 // sh:min/sh:max only on numbers and dates
 function collectMinMaxTyped(spec, profile) {
-  const startShapeUri = entityForClass(profile, spec.targetClass);
+  const startShapeUri = startShapeOf(spec, profile);
   for (const col of spec.columns) {
     if (col.collect !== SH + 'min' && col.collect !== SH + 'max') continue;
     const name = col.collect === SH + 'min' ? 'sh:min' : 'sh:max';
@@ -176,11 +201,11 @@ function anyOfLimits(spec) {
     const c = filter.constraints;
     if (!c.anyOf) continue;
     if (c.anyOf.length > ANYOF_MAX_TERMS) {
-      return `rep:anyOf has ${c.anyOf.length} terms. The limit is ${ANYOF_MAX_TERMS}. Use sh:in with exact URIs instead (find them with lookup_values).`;
+      return `rep:anyOf has ${c.anyOf.length} terms. The limit is ${ANYOF_MAX_TERMS}. Narrow the words, or split the filter into two sh:property blocks.`;
     }
     for (const term of c.anyOf) {
       if (term.type === 'uri') {
-        return 'a rep:anyOf term is a URI. rep:anyOf takes Dutch words, not URIs. Use sh:in with the exact URI instead.';
+        return 'a rep:anyOf term is a URI. rep:anyOf takes Dutch words, not URIs.';
       }
       if (term.value && term.value.length > ANYOF_MAX_TERM_LENGTH) {
         return `a rep:anyOf term is ${term.value.length} characters. The limit is ${ANYOF_MAX_TERM_LENGTH}.`;
@@ -232,7 +257,7 @@ function parsesAsDate(value, withTime) {
 }
 
 const CHECKS = [
-  ['no sh:targetClass or unknown', targetClass],
+  ['no entity or unknown class', startEntity],
   ['no columns', columnsPresent],
   ['column without rdfs:label', columnLabel],
   ['two columns with one label', columnLabelsUnique],

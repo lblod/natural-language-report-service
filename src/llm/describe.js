@@ -32,7 +32,7 @@ async function loadCodeList(profile, f, key) {
   try {
     values = await queryCodeList(f.class);
   } catch (e) {
-    // the read failed; report nothing, the LLM will use lookup_values
+    // the read failed; report nothing, the LLM will use rep:anyOf with words
     values = [];
   }
   cache.set(key, { values, at: Date.now() });
@@ -54,35 +54,36 @@ async function queryCodeList(type) {
 
 export function describeProfile(profile, codeLists = {}) {
   const lines = [];
-  lines.push('Een spec is Turtle, precies in deze vorm (kopieer deze prefixes):');
+  lines.push('A spec is Turtle, in exactly this shape (copy these prefixes):');
   lines.push('@prefix rep:  <http://mu.semte.ch/vocabularies/reporting/> .');
   lines.push('@prefix sh:   <http://www.w3.org/ns/shacl#> .');
   lines.push('@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .');
   lines.push('@prefix dct:  <http://purl.org/dc/terms/> .');
   lines.push('');
-  lines.push('<http://data.lblod.info/id/report-specs/<uw-id>> a rep:ReportSpec , sh:NodeShape ;');
+  lines.push('<http://data.lblod.info/id/report-specs/<your-id>> a rep:ReportSpec , sh:NodeShape ;');
   lines.push('  dct:title "..." ;');
   lines.push(`  rep:profile <${profile.uri}> ;`);
-  lines.push('  sh:targetClass <de rdf:type uit de lijst hieronder> ;');
-  lines.push('  sh:property [ ... ] ;   # filters, optioneel');
+  lines.push('  sh:targetClass <the rdf:type from the list below> ;');
+  lines.push('  sh:property [ ... ] ;   # filters, optional');
   lines.push('  rep:columns ( [ sh:path ( ... ) ; rdfs:label "..." ] ... ) .');
-  lines.push('Elke kolom eindigt op een waardeveld. rep:self als sh:path geeft de eigen URI.');
+  lines.push('Every column ends on a value field. Use rep:self as sh:path for the subject URI.');
   lines.push('');
-  lines.push('sh:targetClass is de volledige URI tussen haakjes achter de entiteit hieronder.');
-  lines.push('Gebruik in sh:path de predicate-URI die achter elke veldnaam staat, niet de veldnaam zelf.');
-  lines.push('Een omgekeerde hop (het veld staat "(omgekeerd)" achter) schrijf je in de lijst als [ sh:inversePath <predicate> ] .');
-  lines.push('Een datumfilter is sh:minInclusive of sh:maxInclusive met "jjjj-mm-dd"^^xsd:dateTime');
-  lines.push('(kopieer ook het xsd-prefix hierboven niet: voeg @prefix xsd: <http://www.w3.org/2001/XMLSchema#> toe).');
+  lines.push('sh:targetClass is the full URI in brackets after the entity below.');
+  lines.push('In sh:path, use the predicate URI shown after each field name, not the field name itself.');
+  lines.push('An inverse hop (the field shows "(inverse)") goes in the list as [ sh:inversePath <predicate> ] .');
+  lines.push('When two entities share one sh:targetClass, pick one with rep:entity <the URI after the entity>.');
+  lines.push('A date filter is sh:minInclusive or sh:maxInclusive with "yyyy-mm-dd"^^xsd:dateTime');
+  lines.push('(the xsd prefix above is not copied: add @prefix xsd: <http://www.w3.org/2001/XMLSchema#>).');
   lines.push('');
   for (const shape of profile.shapes) {
-    lines.push(`${shape.label || shape.targetClass} — sh:targetClass <${shape.targetClass}>`);
+    lines.push(`${shape.label || shape.targetClass} — sh:targetClass <${shape.targetClass}> ; rep:entity <${shape.uri}>`);
     for (const f of shape.fields) {
       const key = `${shape.uri}|${f.path}|${f.inverse ? 1 : 0}`;
       const kind = f.datatype ? datatypeName(f.datatype)
         : f.class ? `→ ${conceptLabel(f.class, codeLists[key])}`
         : f.node ? `→ ${linkedLabel(profile, f.node)}`
         : '?';
-      const dir = f.inverse ? ' (omgekeerd)' : '';
+      const dir = f.inverse ? ' (inverse)' : '';
       const pathShown = typeof f.path === 'string' ? f.path : '?';
       lines.push(`  ${f.name || pathShown}  sh:path <${pathShown}>${dir}  ${kind}`);
     }

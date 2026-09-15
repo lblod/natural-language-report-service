@@ -6,6 +6,7 @@ import { readFileSync } from 'fs';
 const SH = 'http://www.w3.org/ns/shacl#';
 const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const OWL_ONTOLOGY = 'http://www.w3.org/2002/07/owl#Ontology';
+const REP = 'http://mu.semte.ch/vocabularies/reporting/';
 
 export async function loadProfiles(dir) {
   const fs = await import('fs');
@@ -52,7 +53,8 @@ export async function loadProfile(file) {
     const targetClass = store.getQuads(shape, SH + 'targetClass', null)[0]?.object.value || null;
     const label = store.getQuads(shape, 'http://www.w3.org/2000/01/rdf-schema#label', null)[0]?.object.value || null;
     const fields = store.getQuads(shape, SH + 'property', null).map(q => parseField(store, q.object));
-    return { uri: shape.value, targetClass, label, fields };
+    const discriminator = parseDiscriminator(store, shape);
+    return { uri: shape.value, targetClass, label, fields, discriminator };
   });
 
   return { uri, title, prefixes, shapes: shapeList, store };
@@ -82,9 +84,44 @@ function parseField(store, p) {
   };
 }
 
+// rep:discriminator tells shapes that share a targetClass apart. sh:minCount 1
+// becomes a plain triple in the seed, sh:maxCount 0 a FILTER NOT EXISTS.
+function parseDiscriminator(store, shape) {
+  const node = store.getQuads(shape, REP + 'discriminator', null)[0]?.object;
+  if (!node) return null;
+  let path = null, inverse = false;
+  const pathQuad = store.getQuads(node, SH + 'path', null)[0]?.object;
+  if (pathQuad) {
+    if (pathQuad.termType === 'BlankNode') {
+      const inv = store.getQuads(pathQuad, SH + 'inversePath', null)[0]?.object;
+      if (inv) { path = inv.value; inverse = true; }
+    } else {
+      path = pathQuad.value;
+    }
+  }
+  const one = (pred) => store.getQuads(node, pred, null)[0]?.object?.value || null;
+  const minCount = one(SH + 'minCount');
+  const maxCount = one(SH + 'maxCount');
+  if (!path || (minCount === null && maxCount === null)) return null;
+  return {
+    path, inverse,
+    minCount: minCount !== null ? Number(minCount) : null,
+    maxCount: maxCount !== null ? Number(maxCount) : null,
+  };
+}
+
 export function entityForClass(profile, cls) {
   const shape = profile.shapes.find(s => s.targetClass === cls);
   return shape ? shape.uri : null;
+}
+
+// The shape a spec starts from. rep:entity wins; a targetClass only resolves
+// when exactly one shape carries it, so a class two entities share is a
+// validator error, not a silent first match.
+export function startShape(profile, spec) {
+  if (spec.entity) return shape(profile, spec.entity);
+  const matches = profile.shapes.filter(s => s.targetClass === spec.targetClass);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function shape(profile, shapeUri) {

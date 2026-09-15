@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync } from 'fs';
 
 // Rows to a CSV file. CSV_SEPARATOR is ';' by default. A cell is quoted
 // only when it holds the separator, a quote or a newline; a quote inside a
@@ -32,9 +32,4 @@ export function writeSpec(csvName, spec) {
   const name = csvName.replace(/\.csv$/, '') + '.ttl';
   writeFileSync(`${SHARE_DIR}/${name}`, spec, 'utf8');
   return `share://${name}`;
-}
-
-export function readSpec(pointer) {
-  if (!pointer.startsWith('share://')) throw new Error(`not a share:// pointer: ${pointer}`);
-  return readFileSync(`${SHARE_DIR}/${pointer.slice('share://'.length)}`, 'utf8');
 }

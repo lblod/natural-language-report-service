@@ -19,6 +19,7 @@ export function parseSpec(turtle) {
   const one = (s, pred) => store.getQuads(s, pred, null)[0]?.object || null;
 
   const targetClass = one(specNode, SH + 'targetClass')?.value || null;
+  const entity = one(specNode, REP + 'entity')?.value || null;
   const profileUri = one(specNode, REP + 'profile')?.value || null;
   const title = one(specNode, 'http://purl.org/dc/terms/title')?.value || null;
 
@@ -28,7 +29,7 @@ export function parseSpec(turtle) {
   const columnsQuad = one(specNode, REP + 'columns');
   const columns = columnsQuad ? parseColumnList(store, columnsQuad) : [];
 
-  return { uri: specNode.value, title, profileUri, targetClass, filters, columns };
+  return { uri: specNode.value, title, profileUri, targetClass, entity, filters, columns };
 }
 
 function parseFilter(store, p, { withLabel = false } = {}) {

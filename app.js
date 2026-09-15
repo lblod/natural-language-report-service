@@ -1,7 +1,7 @@
-import { app } from 'mu';
+import { app, errorHandler } from 'mu';
 import express from 'express';
 import { loadProfiles } from './src/runner/profile.js';
-import { buildSession, stripStoreError } from './src/db.js';
+import { sessionQuery, sessionUpdate, stripStoreError } from './src/db.js';
 import { ask } from './src/llm/loop.js';
 import { mountChat } from './src/chat/index.js';
 import { reportAssistant } from './src/report-assistant.js';
@@ -41,7 +41,7 @@ app.post('/ask', express.json(), async (req, res) => {
       ...(Array.isArray(history) ? history : []),
       { role: 'user', content: question },
     ];
-    const session = await buildSession();
+    const session = { query: sessionQuery, update: sessionUpdate };
     const { text, trace } = await ask(turns, profiles, session);
     res.json({ answer: text, toolCalls: trace });
   } catch (e) {
@@ -49,3 +49,5 @@ app.post('/ask', express.json(), async (req, res) => {
     res.status(502).json({ error: stripStoreError(e.message) });
   }
 });
+
+app.use(errorHandler);

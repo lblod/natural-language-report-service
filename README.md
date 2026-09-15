@@ -26,8 +26,8 @@ namespace is `http://mu.semte.ch/vocabularies/reporting/` (`rep:`).
 
 The run: check → seed (`SELECT DISTINCT ?s`, paged) → columns (per group, per
 chunk of subjects) → assemble (dedup + `rep:collect`) → CSV → register file
-+ report resource. The job is a `cogs:Job` + `task:Task` we write ourselves,
-with `mu-call-scope-id` set so jobs-controller ignores it.
++ report resource. One run per question; the loop stops after `run_report`
+returns.
 
 ## One identity: mu-authorization's
 
@@ -52,7 +52,8 @@ POST /assistant/conversations/:id/turns      { content }           → 202 { id 
 service (profiles, lookups, spec, validate, repair, run), and the answer in
 Dutch comes back with a trace of the tool calls. The CSV lands in
 `data/files/`. `history` carries the earlier turns for follow-ups; the
-conversation lives on the caller's side, the service stores nothing.
+conversation lives on the caller's side, the service stores nothing. One
+question makes one report; the loop stops after `run_report`.
 
 `/assistant` is the chat. The turn module in
 `src/chat/` is generic — it imports nothing from `src/llm/` or `src/runner/`
@@ -67,15 +68,13 @@ that way. Failure is a message, never a silent loader.
 `/ask` needs `LLM_BASE_URL` set, and answers 503 without it. A full-org report
 run takes minutes.
 
-The job is a resource: read it at `/jobs/:id`, or watch the dashboard.
-
 ### The internal tools
 
-The loop drives eight tool handlers (`src/llm/tools.js`): `list_profiles`,
-`describe_profile`, `validate_spec`, `lookup_values`, `preview_queries`,
-`run_report`, `report_status`, `export_spec`. They are machinery, not an
+The loop drives four tool handlers (`src/llm/tools.js`): `list_profiles`,
+`describe_profile`, `validate_spec`, `run_report`. They are machinery, not an
 external surface — the tool trace in the answer is the only thing a caller
-sees of them.
+sees of them. All LLM-facing text (system prompt, profile menu, tool
+descriptions, validator errors) is English; the answer the user sees is Dutch.
 
 ## Environment
 
