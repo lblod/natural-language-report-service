@@ -121,7 +121,7 @@ async function runLoop(turns, profiles, session, mode, trace) {
   const messages = [{ role: 'system', content: systemPrompt }, ...turns];
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const reply = await chat(messages);
+    const reply = await chat(messages, { tools: toolDefs(mode) });
     messages.push(reply.message);
     const calls = reply.message.tool_calls || [];
     if (!calls.length) {
@@ -150,9 +150,10 @@ async function runLoop(turns, profiles, session, mode, trace) {
 }
 
 // chat(messages, { tools, toolChoice }) → { message }
-// The one place that talks to the provider. tools null means a plain
-// completion (used by the mode classifier); toolChoice defaults to 'auto'.
-export async function chat(messages, { tools = toolDefs(), toolChoice = 'auto' } = {}) {
+// The one place that talks to the provider. tools null (the default) means a
+// plain completion (the mode classifier); runLoop passes its mode's tool
+// definitions; toolChoice defaults to 'auto'.
+export async function chat(messages, { tools = null, toolChoice = 'auto' } = {}) {
   // Send only the fields every provider accepts back.
   const wire = messages.map(m => {
     const out = { role: m.role, content: m.content ?? null };
@@ -204,8 +205,8 @@ function parseArgs(s) {
 
 // The tool definitions sent to the model.
 import { toolSchemas } from './schemas.js';
-function toolDefs() {
-  return toolSchemas().map(t => ({
+function toolDefs(mode) {
+  return toolSchemas(mode).map(t => ({
     type: 'function',
     function: {
       name: t.name,
