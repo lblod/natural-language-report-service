@@ -126,7 +126,7 @@ function collectMinMaxTyped(spec, profile) {
       : NUMERIC_DATATYPES.has(f.datatype) ? 'number'
       : null;
     if (!kind) {
-      return `"${f.name || last.predicate}" is text, so ${name} does not apply. Use rep:row, or leave it out to join the values.`;
+      return `"${f.name || last.predicate}" is text, so ${name} does not apply. Use rep:row (same as leaving rep:collect out: every value gets its own row).`;
     }
   }
   return null;
@@ -150,7 +150,7 @@ function columnPure(spec) {
       return `a column carries ${which}. Constraints belong in sh:property.`;
     }
     if (col.collect && ![SH + 'groupConcat', SH + 'min', SH + 'max', REP + 'row'].includes(col.collect)) {
-      return `column "${col.label}" has an unknown rep:collect <${col.collect}>. Use sh:groupConcat (default), rep:row, sh:min or sh:max.`;
+      return `column "${col.label}" has an unknown rep:collect <${col.collect}>. Use sh:groupConcat (joins the values), rep:row or nothing (each value gets its own row), sh:min or sh:max.`;
     }
   }
   return null;

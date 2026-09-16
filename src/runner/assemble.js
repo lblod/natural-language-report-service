@@ -1,7 +1,9 @@
 // Values to rows. Subjects in stable order, dedup on term, collect per cell.
 // rep:self columns take the subject URI; a column with no values is an
-// empty cell, never a dropped row. rep:row expands one subject into several
-// lines; at most one column per spec may do that (checked in check.js).
+// empty cell, never a dropped row. A column without rep:collect joins its
+// values only when there is one; with several, each value gets its own row
+// (the other columns repeat theirs). rep:row forces that expansion; at most
+// one column per spec may do that explicitly (checked in check.js).
 
 const SH = 'http://www.w3.org/ns/shacl#';
 const REP = 'http://mu.semte.ch/vocabularies/reporting/';
@@ -26,7 +28,8 @@ export function assemble(subjects, values, spec) {
     });
     const lines = Math.max(1, ...cells.map(c => c.length));
     for (let r = 0; r < lines; r++) {
-      // every cell except the expanding one keeps its value on each line
+      // the expanding cell cycles its values, every other cell keeps its
+      // value on each line
       rows.push(cells.map(c => c[Math.min(r, c.length - 1)]));
     }
   }
@@ -36,9 +39,13 @@ export function assemble(subjects, values, spec) {
 function collect(terms, col) {
   switch (col.collect) {
     case SH + 'groupConcat':
-    case null:
-    case undefined:
       return [terms.map(t => t.value).join(col.separator ?? ',')];
+    case undefined:
+    case null:
+      // no rep:collect: one value is a normal cell, several values each
+      // get their own row instead of a joined string
+      if (terms.length <= 1) return [terms.map(t => t.value).join(',')];
+      return terms.map(t => t.value);
     case SH + 'min':
       return [extreme(terms, col, -1)];
     case SH + 'max':
