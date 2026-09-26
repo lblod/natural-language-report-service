@@ -39,7 +39,25 @@ function parseFilter(store, p, { withLabel = false } = {}) {
   return {
     path,
     constraints: readConstraints(store, p, { withLabel }),
+    where: readWhere(store, p),
   };
+}
+
+// rep:where: conditions on the nodes a filter or column walks through. Each
+// is written like a filter, from the row; check.js refuses one nested in
+// another.
+function readWhere(store, node) {
+  return store.getQuads(node, REP + 'where', null).map(q =>
+    parseFilter(store, q.object, { withLabel: true }));
+}
+
+// The number of steps two paths have in common from the row. A rep:where
+// shares those nodes with its filter or column.
+export function sharedSteps(a, b) {
+  let k = 0;
+  while (k < a.length && k < b.length
+    && a[k].predicate === b[k].predicate && !!a[k].inverse === !!b[k].inverse) k++;
+  return k;
 }
 
 function parseColumnList(store, listNode) {
@@ -70,6 +88,7 @@ function parseColumn(store, col) {
     collect: store.getQuads(col, REP + 'collect', null)[0]?.object.value || null,
     separator: store.getQuads(col, SH + 'separator', null)[0]?.object.value || null,
     constraints: readConstraints(store, col),   // kept so check.js can refuse it
+    where: readWhere(store, col),
   };
 }
 

@@ -49,6 +49,13 @@ A **spec** is `rep:ReportSpec` + `sh:NodeShape`: `sh:property` selects the
 subjects, `rep:columns` says what the CSV holds. The two never interact. The
 namespace is `http://mu.semte.ch/vocabularies/reporting/` (`rep:`).
 
+A filter tests only the end of its own path. To test a node in the middle of
+a path ("the mandate whose role is Burgemeester"), a filter or column carries
+`rep:where`: a condition written like a filter, from the row, that shares the
+nodes of every step it has in common with its host. On a column it drops
+values from the cell, never rows. The app's `report-spec-readme.md` has the
+details and an example.
+
 The run: check → seed (`SELECT DISTINCT ?s`, paged) → columns (per group, per
 chunk of subjects) → assemble (dedup + `rep:collect`) → CSV → register file
 + report resource. One run per confirmed spec.
@@ -64,6 +71,19 @@ the caller's.
 
 The tools the LLM calls return URIs, counts, statuses and column names —
 never a cell value.
+
+### The rule: no report data reaches the LLM
+
+No report row, row count or run error ever reaches the LLM. A run starts
+after the turn's only LLM call (the mode check) and answers with fixed text.
+What the LLM does see: the conversation, the profiles, validator messages,
+spec files, and public reference data read under the service scope (inlined
+code lists and `lookup_values`, see below).
+
+Keep it that way. Do not add a tool that previews, samples or counts what a
+spec would match, not even to catch a `rep:where` that hangs on the wrong
+node. That check stays on the profile: `validate_spec` says where each
+`rep:where` applies, and the proposal repeats it to the user.
 
 ### The service scope
 

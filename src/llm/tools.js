@@ -7,7 +7,7 @@
 // The shape every tool returns is { content: [{ type: 'text', text }] },
 // which the loop passes straight back to the model.
 
-import { checkSpec } from '../runner/check.js';
+import { checkSpec, whereNotes } from '../runner/check.js';
 import { parseSpec } from '../runner/spec.js';
 import { describeProfile, codeListValues } from './describe.js';
 import { lookupValues } from './lookup.js';
@@ -36,9 +36,10 @@ export function buildTools(profiles, session) {
     const p = findProfile(parsed.profileUri);
     if (!p) return text(`no profile <${parsed.profileUri}>. Available: ${profileList().map(x => x.title).join(', ')}.`);
     const errors = checkSpec(parsed, p, MAX_PATH_DEPTH, profiles);
+    if (errors.length) return text(errors[0]);
     // The spec that checks out becomes the attached proposal.
-    if (!errors.length) session.onSpecValidated?.(spec);
-    return text(errors.length ? errors[0] : 'ok');
+    session.onSpecValidated?.(spec);
+    return text(['ok', ...whereNotes(parsed, p)].join('\n'));
   }
 
   async function list_profiles() {

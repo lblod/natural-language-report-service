@@ -19,7 +19,7 @@ const COMMON = [
   },
   {
     name: 'validate_spec',
-    description: 'Validate a report spec (Turtle). Returns "ok" or one clear sentence saying what is wrong and what to write instead. No database is touched.',
+    description: 'Validate a report spec (Turtle). Returns "ok", followed by one line per rep:where saying where it applies, or one clear sentence saying what is wrong and what to write instead. No database is touched.',
     inputSchema: {
       type: 'object',
       properties: { spec: { type: 'string', description: 'The spec as Turtle text' } },

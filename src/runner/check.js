@@ -1,5 +1,6 @@
 import { fieldsOf } from './profile.js';
 import { NUMERIC_DATATYPES } from './assemble.js';
+import { sharedSteps } from './spec.js';
 
 const SH = 'http://www.w3.org/ns/shacl#';
 const REP = 'http://mu.semte.ch/vocabularies/reporting/';
@@ -55,6 +56,22 @@ function startEntity(spec, profile) {
 
 function shapeList(profile) {
   return profile.shapes.map(s => s.label || s.targetClass).join(', ');
+}
+
+// Every condition in the spec: the filters, and the rep:where conditions on
+// filters and columns, with the words that name each one in a message. A
+// rep:where also carries its host, the filter or column it hangs on.
+function conditions(spec) {
+  const out = spec.filters.map((f, i) => ({ what: `filter ${i + 1}`, cond: f }));
+  spec.filters.forEach((f, i) => f.where.forEach((w, j) => out.push({
+    what: `rep:where ${j + 1} on filter ${i + 1}`, cond: w,
+    host: { what: `filter ${i + 1}`, path: f.path },
+  })));
+  spec.columns.forEach(c => c.where.forEach((w, j) => out.push({
+    what: `rep:where ${j + 1} on column "${c.label}"`, cond: w,
+    host: { what: `column "${c.label}"`, path: c.path },
+  })));
+  return out;
 }
 
 // The shape a spec starts from, after startEntity has approved it: rep:entity
@@ -147,7 +164,7 @@ function columnPure(spec) {
   for (const col of spec.columns) {
     if (Object.keys(col.constraints || {}).length) {
       const which = Object.keys(col.constraints)[0];
-      return `a column carries ${which}. Constraints belong in sh:property.`;
+      return `a column carries ${which}. Constraints belong in sh:property, or in rep:where for a condition on a step of this column.`;
     }
     if (col.collect && ![SH + 'groupConcat', SH + 'min', SH + 'max', REP + 'row'].includes(col.collect)) {
       return `column "${col.label}" has an unknown rep:collect <${col.collect}>. Use sh:groupConcat (joins the values), rep:row or nothing (each value gets its own row), sh:min or sh:max.`;
@@ -156,11 +173,11 @@ function columnPure(spec) {
   return null;
 }
 
-// No label inside a filter
+// No label inside a filter or rep:where
 function filterLabel(spec) {
-  for (const filter of spec.filters) {
-    if ((filter.constraints || {}).label) {
-      return 'a filter carries rdfs:label. Move it to rep:columns to show it.';
+  for (const { what, cond } of conditions(spec)) {
+    if ((cond.constraints || {}).label) {
+      return `${what} carries rdfs:label. Move it to rep:columns to show it.`;
     }
   }
   return null;
@@ -171,11 +188,11 @@ function filterLabel(spec) {
 function filterConstraint(spec) {
   const MEANINGFUL = ['minCount', 'maxCount', 'hasValue', 'in', 'minInclusive',
     'maxInclusive', 'minExclusive', 'maxExclusive', 'pattern', 'flags', 'anyOf'];
-  for (const [i, filter] of spec.filters.entries()) {
-    const c = filter.constraints || {};
+  for (const { what, cond } of conditions(spec)) {
+    const c = cond.constraints || {};
     if (!MEANINGFUL.some(k => c[k] !== undefined && c[k] !== null)) {
-      const p = filter.path.map(h => h.predicate).join(' → ');
-      return `filter ${i + 1} (path ${p}) has no condition. Add one: sh:hasValue for an exact value, sh:in for a list, rep:anyOf for words, or remove the filter.`;
+      const p = cond.path.map(h => h.predicate).join(' → ');
+      return `${what} (path ${p}) has no condition. Add one: sh:hasValue for an exact value, sh:in for a list, rep:anyOf for words, or remove the filter.`;
     }
   }
   return null;
@@ -183,8 +200,8 @@ function filterConstraint(spec) {
 
 // sh:maxCount above 0 needs counting
 function maxCountZero(spec) {
-  for (const [i, filter] of spec.filters.entries()) {
-    const c = filter.constraints;
+  for (const { cond } of conditions(spec)) {
+    const c = cond.constraints;
     if (c.maxCount !== null && c.maxCount !== undefined && c.maxCount > 0) {
       return `sh:maxCount ${c.maxCount} needs counting, which this service cannot do. Use sh:maxCount 0 for "has none", or drop it.`;
     }
@@ -197,8 +214,8 @@ function maxCountZero(spec) {
 
 // rep:anyOf size limits
 function anyOfLimits(spec) {
-  for (const [i, filter] of spec.filters.entries()) {
-    const c = filter.constraints;
+  for (const { cond } of conditions(spec)) {
+    const c = cond.constraints;
     if (!c.anyOf) continue;
     if (c.anyOf.length > ANYOF_MAX_TERMS) {
       return `rep:anyOf has ${c.anyOf.length} terms. The limit is ${ANYOF_MAX_TERMS}. Narrow the words, or split the filter into two sh:property blocks.`;
@@ -217,8 +234,8 @@ function anyOfLimits(spec) {
 
 // sh:in must not mix URIs and literals
 function inHomogeneous(spec) {
-  for (const filter of spec.filters) {
-    const c = filter.constraints;
+  for (const { cond } of conditions(spec)) {
+    const c = cond.constraints;
     if (!c.in) continue;
     const uris = c.in.filter(t => t.type === 'uri').length;
     if (uris > 0 && uris < c.in.length) {
@@ -231,8 +248,8 @@ function inHomogeneous(spec) {
 // Typed literals must parse
 function literalsParse(spec) {
   const constraintTerms = [];
-  for (const filter of spec.filters) {
-    const c = filter.constraints;
+  for (const { cond } of conditions(spec)) {
+    const c = cond.constraints;
     for (const key of ['hasValue', 'minInclusive', 'maxInclusive', 'minExclusive', 'maxExclusive']) {
       if (c[key]) constraintTerms.push(c[key]);
     }
@@ -248,6 +265,56 @@ function literalsParse(spec) {
     }
   }
   return null;
+}
+
+// rep:where: walks from the row through the profile, shares at least one
+// step with its filter or column, and holds no rep:where of its own.
+function whereConditions(spec, profile, maxPathDepth) {
+  const startShapeUri = startShapeOf(spec, profile);
+  for (const { what, cond, host } of conditions(spec)) {
+    if (!host) continue;
+    if (cond.where.length) {
+      return `${what} holds a rep:where of its own. Put every rep:where directly on the filter or column.`;
+    }
+    const err = walk(profile, startShapeUri, cond.path, maxPathDepth, what, false);
+    if (err) return err;
+    const k = sharedSteps(host.path, cond.path);
+    if (!k) {
+      return `${what} shares no step with ${host.what}. Start its path with the same steps as ${host.what}; a condition on the row itself goes in sh:property.`;
+    }
+    const c = cond.constraints;
+    if (k === cond.path.length && (c.maxCount === 0 || c.minCount === 2)) {
+      return `${what} ends on a step of ${host.what}, so ${c.maxCount === 0 ? 'sh:maxCount 0' : 'sh:minCount 2'} has nothing to count. Add the step that must be missing or repeated.`;
+    }
+  }
+  for (const [i, filter] of spec.filters.entries()) {
+    if (filter.where.length && filter.constraints.minCount === 2) {
+      return `filter ${i + 1} combines sh:minCount 2 with rep:where. Use one of the two.`;
+    }
+  }
+  return null;
+}
+
+// Where each rep:where applies, in the profile's words, so the proposal can
+// say it. Profile only, no database.
+export function whereNotes(spec, profile) {
+  const startShapeUri = startShapeOf(spec, profile);
+  return conditions(spec).filter(x => x.host).map(({ what, cond, host }) => {
+    const k = sharedSteps(host.path, cond.path);
+    return `${what} applies at ${nodeName(profile, startShapeUri, host.path.slice(0, k))}, after step ${k} of ${host.what}.`;
+  });
+}
+
+// The entity a path lands on, or the value field when it ends on one.
+function nodeName(profile, startShapeUri, hops) {
+  let shapeUri = startShapeUri;
+  for (const [i, hop] of hops.entries()) {
+    const f = fieldsOf(profile, shapeUri).find(x => x.path === hop.predicate && !!x.inverse === !!hop.inverse);
+    if (!f) return `step ${hops.length}`;
+    if (!f.node) return i === hops.length - 1 ? `the value "${f.name}"` : `step ${hops.length}`;
+    shapeUri = f.node;
+  }
+  return `"${profile.shapes.find(s => s.uri === shapeUri)?.label || shapeUri}"`;
 }
 
 function parsesAsDate(value, withTime) {
@@ -270,6 +337,7 @@ const CHECKS = [
   ['typed literal does not parse', literalsParse],
   ['two rep:row columns', oneRowColumn],
   ['path does not resolve', pathsResolve],
+  ['rep:where does not fit', whereConditions],
   ['sh:min/sh:max on a non-number', collectMinMaxTyped],
 ];
 
@@ -308,7 +376,7 @@ function walk(profile, startShapeUri, hops, maxPathDepth, what, isColumn) {
     const fields = fieldsOf(profile, shapeUri);
     const f = fields.find(x => x.path === hop.predicate && !!x.inverse === !!hop.inverse);
     if (!f) {
-      const have = fields.map(x => (x.inverse ? `geen ${x.name} (${x.path}, omgekeerd)` : `${x.name} (${x.path})`)).join(', ');
+      const have = fields.map(x => (x.inverse ? `${x.name} (${x.path}, inverse)` : `${x.name} (${x.path})`)).join(', ');
       const shapeLabel = profile.shapes.find(s => s.uri === shapeUri)?.label || shapeUri;
       return `at "${shapeLabel}" there is no "${hop.predicate}". It has: ${have || '(nothing)'}.`;
     }

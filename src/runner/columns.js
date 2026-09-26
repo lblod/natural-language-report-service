@@ -1,4 +1,5 @@
 import { sparqlEscapeUri } from '../db.js';
+import { wherePatterns } from './seed.js';
 
 // Fetch column values for known subjects. Columns are grouped by their
 // shared non-leaf hops; two columns share a query only when every hop
@@ -21,14 +22,17 @@ export async function fetchColumns(sessionQuery, subjects, spec, values = new Ma
 
 // Group columns by their shared prefix (every hop before the leaf) and the
 // direction of the leaf. A column with an empty path (rep:self) joins no group.
+// A column with rep:where only shares a group with the same conditions.
 export function groupColumns(columns) {
   const groups = new Map();
   columns.forEach((col, index) => {
     if (!col.path.length) return;   // rep:self
     const leaf = col.path[col.path.length - 1];
-    const key = col.path.map(h => `${h.inverse ? '^' : ''}${h.predicate}`).join(' > ');
+    const where = col.where || [];
+    const key = col.path.map(h => `${h.inverse ? '^' : ''}${h.predicate}`).join(' > ')
+      + (where.length ? ` | ${JSON.stringify(where)}` : '');
     if (!groups.has(key)) {
-      groups.set(key, { hops: col.path, columns: [] });
+      groups.set(key, { hops: col.path, where, columns: [] });
     }
     groups.get(key).columns.push({ index, leaf: leaf.predicate });
   });
@@ -49,6 +53,10 @@ export function groupQuery(group, chunk) {
   const leaf = group.hops[group.hops.length - 1];
   if (leaf.inverse) lines.push(`?v ${sparqlEscapeUri(leaf.predicate)} ${prev} .`);
   else lines.push(`${prev} ${sparqlEscapeUri(leaf.predicate)} ?v .`);
+  // rep:where hangs on the column's own nodes: ?x<k-1> after k hops, ?v at
+  // the end.
+  const nodeVar = (k) => (k === group.hops.length ? '?v' : `?x${k - 1}`);
+  lines.push(...wherePatterns(group.where, group.hops, nodeVar, 'c'));
   return `SELECT ?s ?v WHERE {\n  VALUES ?s { ${subjects} }\n  ${lines.join('\n  ')}\n}`;
 }
 

@@ -1,4 +1,5 @@
 import { sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime, sparqlEscapeDate } from '../db.js';
+import { sharedSteps } from './spec.js';
 
 // Subject selection. One paged query per page; stops at ROW_LIMIT.
 const ROW_LIMIT = Number(process.env.ROW_LIMIT || 200000);
@@ -27,8 +28,7 @@ export function seedPageQuery(spec, limit, offset, shape = null) {
   parts.push(`?s a ${sparqlEscapeUri(targetClass)} .`);
   if (shape?.discriminator) parts.push(discriminatorPattern(shape.discriminator));
   spec.filters.forEach((filter, fi) => {
-    parts.push(hopsPattern(filter.path, `f${fi}`, '?s'));
-    parts.push(constraintsPattern(filter.constraints, `f${fi}`));
+    parts.push(filterPattern(filter, `f${fi}`));
   });
   return `SELECT DISTINCT ?s WHERE {
   ${parts.join('\n  ')}
@@ -66,9 +66,37 @@ export function hopsPattern(hops, varPrefix, startVar) {
   return patterns.join('\n  ');
 }
 
-export function constraintsPattern(c, varPrefix) {
-  const parts = [];
-  const v = `?${varPrefix}_v`;
+// One filter: its condition, plus its rep:where conditions on the nodes it
+// walks through. With sh:maxCount 0 the whole of it becomes "none such".
+function filterPattern(filter, varPrefix) {
+  const nodeVar = (k) => (k === filter.path.length ? `?${varPrefix}_v` : `?${varPrefix}_${k}`);
+  const wheres = wherePatterns(filter.where, filter.path, nodeVar, varPrefix);
+  if (filter.constraints.maxCount === 0) {
+    return `FILTER NOT EXISTS {\n    ${[hopsPattern(filter.path, varPrefix, '?s'), ...wheres].join('\n    ')}\n  }`;
+  }
+  return [conditionPattern(filter.constraints, varPrefix, filter.path, '?s'), ...wheres].join('\n  ');
+}
+
+// The rep:where conditions of a filter or column. Each starts at the node
+// after the steps it shares with its host; nodeVar(k) names that node in the
+// host's own query.
+export function wherePatterns(where, hostHops, nodeVar, varPrefix) {
+  return (where || []).map((w, wi) => {
+    const k = sharedSteps(hostHops, w.path);
+    return conditionPattern(w.constraints, `${varPrefix}_w${wi}`, w.path.slice(k), nodeVar(k));
+  });
+}
+
+// A condition: the hops from startVar and the test on where they end. A
+// filter starts at ?s; a rep:where starts at a node of its host and, with no
+// hops left, tests that node itself. sh:maxCount 0 means "none such", so its
+// hops only live inside the NOT EXISTS.
+export function conditionPattern(c, varPrefix, hops, startVar) {
+  if (c.maxCount === 0) {
+    return `FILTER NOT EXISTS { ${hopsPattern(hops, varPrefix + '_nex', startVar)} }`;
+  }
+  const v = hops.length ? `?${varPrefix}_v` : startVar;
+  const parts = hops.length ? [hopsPattern(hops, varPrefix, startVar)] : [];
 
   if (c.hasValue) parts.push(`FILTER(${v} = ${escapeTerm(c.hasValue)})`);
   if (c.in) parts.push(`FILTER(${v} IN (${c.in.map(escapeTerm).join(', ')}))`);
@@ -88,19 +116,15 @@ export function constraintsPattern(c, varPrefix) {
   if (c.minCount === 2) {
     // two distinct leaf values on the same path
     const w = `?${varPrefix}_w`;
-    parts.push(hopsPattern2(c, varPrefix, w));
+    parts.push(hopsPattern2(hops, varPrefix, startVar, w));
     parts.push(`FILTER(${v} != ${w})`);
-  }
-  if (c.maxCount === 0) {
-    parts.push(`FILTER NOT EXISTS { ${hopsPattern(c.path, varPrefix + '_nex', '?s')} }`);
   }
   return parts.join('\n  ');
 }
 
-function hopsPattern2(filter, varPrefix, wVar) {
+function hopsPattern2(hops, varPrefix, startVar, wVar) {
   // repeat the path to a second leaf variable
-  const hops = filter.path.map(h => ({ ...h }));
-  let prev = '?s';
+  let prev = startVar;
   const patterns = [];
   for (let i = 0; i < hops.length; i++) {
     const hop = hops[i];

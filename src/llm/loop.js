@@ -33,6 +33,18 @@ Rules:
 - Filters go in sh:property. Columns go in rep:columns, in the order you want.
 - To match a topic rather than a value, list the Dutch words and compounds you
   would expect and put them all in rep:anyOf.
+- A filter tests only the end of its own path, and two filters never share a
+  node. To test a node in the middle of a path (for example "the mandate
+  whose role is Burgemeester"), give that filter or column a rep:where:
+  rep:where [ sh:path ( <the same first steps> <more steps> ) ; <one condition> ].
+  Write its path from the row, like a filter. The steps it has in common with
+  its filter or column are the same nodes, and its condition tests where its
+  own path ends. On a column, rep:where drops values from the cell, never
+  rows. Several rep:where on one filter or column all apply.
+- validate_spec answers "ok" plus one line per rep:where saying where it
+  applies. Say that in Dutch in your proposal, so the user can check it.
+- Only offer what validate_spec accepted. Before you suggest an alternative,
+  write it and validate it; if it does not validate, say it cannot be done.
 - You cannot count, sort, take the first N, or compare two subjects. Say so.
 - The report's title is the dct:title you write in the spec. There is no other
   title input.
