@@ -4,8 +4,9 @@
 // Execute turns skip the LLM loop. The mode classifier says the user wants
 // to run the report now; the agreed spec already sits in the conversation
 // as a bijlage, so it is read from disk and fed straight to the runner.
-// The answer is hard-coded: no extra prompt runs for it. When anything on
-// the fast path fails, the turn falls back to the LLM loop as before.
+// The answer is hard-coded: no extra prompt runs for it. When the run cannot
+// happen or fails, the answer is a hard-coded failure message: nothing is
+// retried and no spec is rewritten.
 import { classifyMode } from './llm/mode.js';
 import { ask } from './llm/loop.js';
 import { parseSpec } from './runner/spec.js';
@@ -17,6 +18,9 @@ import { SPEC_MEDIA_TYPE, ATTACHMENT_TYPES } from './chat/vocab.js';
 
 const TEXT = {
   executed: 'Het rapport is uitgevoerd. De bijlagen staan erbij.',
+  noSpec: 'Er is nog geen voorstel om uit te voeren. Beschrijf eerst welk rapport je wilt.',
+  invalid: 'Het voorstel is niet meer geldig. Vraag een nieuw voorstel.',
+  failed: 'Het rapport kon niet uitgevoerd worden. Probeer het later opnieuw.',
 };
 
 const MAX_PATH_DEPTH = Number(process.env.MAX_PATH_DEPTH || 8);
@@ -32,25 +36,32 @@ export function reportAssistant(whenProfiles) {
       try {
         return await runStoredSpec(turn, profiles);
       } catch (e) {
-        console.error('[reports] direct execution failed, falling back to the LLM:', e);
+        console.error('[reports] execution failed:', e);
+        return TEXT.failed;
       }
     }
     return llmAnswer(turn, turns, profiles);
   };
 }
 
-// The fast path: the last spec bijlage in the conversation is the agreed
-// spec. No prompt runs; the runner gets it straight away.
+// Execution: the last spec bijlage in the conversation is the agreed spec.
+// No prompt runs; the runner gets it straight away.
 async function runStoredSpec(turn, profiles) {
   const attachment = lastSpecAttachment(turn.history);
   const content = attachment && readSpecFile(attachment.name);
-  if (!content) throw new Error('no agreed spec in the conversation');
+  if (!content) return TEXT.noSpec;
 
   const parsed = parseSpec(content);
   const profile = profiles.get(parsed.profileUri);
-  if (!profile) throw new Error(`no profile <${parsed.profileUri}>`);
+  if (!profile) {
+    console.error(`[reports] no profile <${parsed.profileUri}>`);
+    return TEXT.invalid;
+  }
   const errors = checkSpec(parsed, profile, MAX_PATH_DEPTH, profiles);
-  if (errors.length) throw new Error(`the agreed spec is not valid: ${errors[0]}`);
+  if (errors.length) {
+    console.error(`[reports] the agreed spec is not valid: ${errors[0]}`);
+    return TEXT.invalid;
+  }
 
   // The conversation's title (named by the first question) names the file.
   // The report itself keeps the dct:title of the spec.
@@ -96,32 +107,20 @@ function readSpecFile(fileName) {
   }
 }
 
-// The LLM loop, refinement and execute mode. LLM answer with the
-// conversation so far; the agreed spec goes on the proposal, and once a
-// report runs, its CSV (registered by the runner as a real file) and the
-// spec go on the same turn. The prompt never carries the Turtle.
+// The LLM loop, refinement only. The spec that checked out goes on the
+// answer as a bijlage. The prompt never carries the Turtle.
 async function llmAnswer(turn, turns, profiles) {
-  // The file uri of the executed report, set by the end callback.
-  let fileUri = null;
   // The last spec that checked out; stored as a file for this turn's
   // final message.
   let spec = null;
 
   const session = {
-    query: turn.query,
-    update: turn.update,
     onSpecValidated(validated) { spec = validated; },
-    async onReportEnd(error, result) {
-      if (!error && result) fileUri = result.fileUri;
-    },
   };
 
   const { text } = await ask(turns, profiles, session);
 
-  // The bijlagen of this turn, all with a real file behind them: the
-  // executed report's CSV first, next the validated spec.
   const attachments = [];
-  if (fileUri) attachments.push({ uri: fileUri });
   if (spec) {
     const stored = await storeSpecFile(turn.update, spec);
     attachments.push({ ...stored, mediaType: SPEC_MEDIA_TYPE });

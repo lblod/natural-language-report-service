@@ -6,18 +6,14 @@ import { registerFile, registerReport } from './report.js';
 import { startShape } from './profile.js';
 
 // Ties the steps together: seed → columns → assemble → CSV → register.
-// Returns { reportUri, fileUri, rowCount }. onProgress fires on every
-// answered query with what the phase knows — { subjects } per seed page,
-// { done, total } per column batch — so a waiter can tell a live run from
-// a stalled one.
+// Returns { reportUri, fileUri, rowCount }.
 
-export async function run(query, update, parsed, profile, title, extra = {}, onProgress = null) {
+export async function run(query, update, parsed, profile, title, extra = {}) {
   const shape = startShape(profile, parsed);
-  const subjects = await seed(query, parsed, shape,
-    onProgress ? (n) => onProgress({ subjects: n }) : null);
+  const subjects = await seed(query, parsed, shape);
 
   const values = new Map();
-  await fetchColumns(query, subjects, parsed, values, null, onProgress);
+  await fetchColumns(query, subjects, parsed, values);
 
   const rows = assemble(subjects, values, parsed);
   const fileName = extra.fileName || `${slug(title)}.csv`;

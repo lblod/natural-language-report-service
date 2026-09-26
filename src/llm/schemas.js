@@ -1,7 +1,6 @@
 // The JSON schemas of the tools. The descriptions are what the LLM reads to
-// decide which tool to call. Two modes share four tools (list_profiles,
-// describe_profile, validate_spec, read_spec); refine adds lookup_values,
-// execute adds run_report.
+// decide which tool to call. Refinement only: list_profiles,
+// describe_profile, validate_spec, read_spec and lookup_values.
 
 const COMMON = [
   {
@@ -43,16 +42,6 @@ const LOOKUP_VALUES = {
   },
 };
 
-const RUN_REPORT = {
-  name: 'run_report',
-  description: 'Run a valid spec and return the report URI, the row count and the file URI. Runs as the caller, so it sees only what they may see. Waits as long as the run keeps answering; gives up after RUN_TIMEOUT seconds of silence. The report is named by the dct:title in the spec. Call this once per question, after validate_spec returns ok. You never see the report data, only the count and URIs.',
-  inputSchema: {
-    type: 'object',
-    properties: { spec: { type: 'string' } },
-    required: ['spec'],
-  },
-};
-
 const READ_SPEC = {
   name: 'read_spec',
   description: 'Return the Turtle of a spec bijlage, a ttl file attached to an earlier message in this conversation. Use it to reuse the agreed spec, or to read back an earlier proposal before you change it. Read-only.',
@@ -63,7 +52,6 @@ const READ_SPEC = {
   },
 };
 
-export function toolSchemas(mode = 'refine') {
-  if (mode === 'execute') return [...COMMON, READ_SPEC, RUN_REPORT];
+export function toolSchemas() {
   return [...COMMON, READ_SPEC, LOOKUP_VALUES];
 }

@@ -22,16 +22,15 @@ a suggestion, not a check. The user must confirm before anything executes.
 As long as the user has not given a clear command, the turn stays in this
 mode.
 
-**Execution (Modus B).** The user has confirmed. The LLM writes the agreed
-spec, validates it and calls `run_report` once, then stops. `run_report`
-returns only the report URI, the row count and the file URI. No cell value
-ever reaches the model; the service may count results, but no data is fed
-to the LLM.
+**Execution (Modus B).** The user has confirmed. No LLM runs. The last spec
+bijlage in the conversation is the agreed spec: the service reads it from the
+share, checks it against its profile and runs it as the caller. The answer is
+a fixed Dutch text with the CSV and the spec as bijlagen. No spec yet, a spec
+that no longer checks out, or a failed run each give a fixed Dutch failure
+message. Nothing is retried and no spec is rewritten.
 
-The two modes share `list_profiles`, `describe_profile` and `validate_spec`.
-Refinement adds `lookup_values`; execution adds `run_report`. The tool set is
-the only thing that differs; the code path from the classifier's answer is
-deterministic.
+Only refinement has tools: `list_profiles`, `describe_profile`,
+`validate_spec`, `read_spec` and `lookup_values`.
 
 ## How it works
 
@@ -52,8 +51,7 @@ namespace is `http://mu.semte.ch/vocabularies/reporting/` (`rep:`).
 
 The run: check → seed (`SELECT DISTINCT ?s`, paged) → columns (per group, per
 chunk of subjects) → assemble (dedup + `rep:collect`) → CSV → register file
-+ report resource. One run per question; the loop stops after `run_report`
-returns.
++ report resource. One run per confirmed spec.
 
 ## One identity: mu-authorization's
 
@@ -74,8 +72,8 @@ The LLM's own reads during refinement (`describe_profile`'s code lists and
 `query(q, { scope })` sends `mu-auth-scope`; the sparql-parser config grants
 that scope read access to `http://mu.semte.ch/graphs/public` only. So
 refinement reads only public code lists, regardless of who calls. Execution
-(`run_report`) still runs as the caller, so the report contains what they may
-see, and the LLM sees none of it.
+still runs as the caller, so the report contains what they may see, and the
+LLM sees none of it.
 
 The scope URI is `SERVICE_SCOPE` (default
 `http://services.semantic.works/natural-language-report`) and must match the
@@ -83,42 +81,31 @@ The scope URI is `SERVICE_SCOPE` (default
 `DEFAULT_MU_AUTH_SCOPE` on the service: that would scope every query
 (including the run and the chat store) and break them.
 
-## Two endpoints
+## The endpoint
 
 ```
-POST /ask                                     { question, history? } → { answer, toolCalls }
 POST /assistant/conversations/:id/turns      { content }           → 202 { id }
 ```
 
-`/ask` is synchronous: a Dutch question in, the turn is classified, and the
-matching mode's loop runs inside the service (profiles, spec, validate,
-refine or run), and the answer in Dutch comes back with a trace of the tool
-calls. The CSV lands in `data/files/`. `history` carries the earlier turns
-for follow-ups; the conversation lives on the caller's side, the service
-stores nothing. One question makes one report; the execution loop stops
-after `run_report`.
-
-`/assistant` is the chat. The turn module in
+This is the chat. The turn module in
 `src/chat/` is generic — it imports nothing from `src/llm/` or `src/runner/`
 and moves between services without edits — and `src/report-assistant.js` is
 this service's one `answer` hook. It records the question, answers `202` with
-the message id, then runs the same loop with the conversation's history. A
-report run becomes an interim message with a pending file (`as:Document` with
-no `as:url`); the URL is set when the run ends. The browser polls
+the message id, then classifies the turn and refines or executes with the
+conversation's history. The answer and its bijlagen are written when the turn
+ends. The browser polls
 `/chat-conversations/:id?include=messages.attachments` and finds the answer
 that way. Failure is a message, never a silent loader.
 
-`/ask` needs `LLM_BASE_URL` set, and answers 503 without it. A full-org report
-run takes minutes.
+The chat needs `LLM_BASE_URL`; without it every turn answers with a failure
+message. A full-org report run takes minutes.
 
 ### The internal tools
 
-The loop drives a tool set per mode (`src/llm/tools.js`). Both modes share
-`list_profiles`, `describe_profile`, `validate_spec`. Refinement adds
-`lookup_values`; execution adds `run_report`. They are machinery, not an
-external surface — the tool trace in the answer is the only thing a caller
-sees of them. All LLM-facing text (system prompts, profile menu, tool
-descriptions, validator errors) is English; the answer the user sees is Dutch.
+The refinement loop drives one tool set (`src/llm/tools.js`). The tools are
+machinery, not an external surface. All LLM-facing text (system prompts,
+profile menu, tool descriptions, validator errors) is English; the answer the
+user sees is Dutch.
 
 ## Environment
 
@@ -130,10 +117,9 @@ descriptions, validator errors) is English; the answer the user sees is Dutch.
 | `SUBJECT_CHUNK_SIZE` | `100` | subjects per column query (VALUES batch size); lower it when the auth layer rejects long queries |
 | `ROW_LIMIT` | `200000` | seed limit; failing the job beats truncating |
 | `MAX_PATH_DEPTH` | `8` | longest allowed spec path |
-| `RUN_TIMEOUT` | `60` | seconds of silence before `run_report` gives up. Every answered query (seed page, column batch) restarts the clock, so a big report only needs the window per batch, not for the whole run. The run itself is never cancelled: the file still lands in the chat. |
 | `INLINE_VALUES_MAX` | `50` | code lists up to this size are inlined in `describe_profile` |
 | `VALUES_TTL` | `3600` | seconds the inlined lists are cached |
-| `LLM_BASE_URL` | — | enables `/ask`; OpenAI-compatible (`https://ollama.com/v1`) |
+| `LLM_BASE_URL` | — | the chat's LLM; OpenAI-compatible (`https://ollama.com/v1`) |
 | `LLM_MODEL` | — | e.g. `gpt-oss:120b` |
 | `LLM_API_KEY` | — | bearer token, optional for local Ollama |
 | `SEED_PAGE_SIZE` | `5000` | seed page size |
@@ -152,7 +138,7 @@ Do not set `ALLOW_MU_AUTH_SUDO`; the template then refuses sudo queries.
 ```yaml
 natural-language-report:
   build: ../natural-language-report-service/
-  image: lblod/natural-language-report-service:0.1.0
+  image: lblod/natural-language-report-service:0.2.0
   volumes:
     - ./data/files:/share
     - ./config/report-profiles/:/config/profiles/
@@ -161,12 +147,12 @@ natural-language-report:
 `config/dispatcher/dispatcher.ex`:
 
 ```elixir
-match "/natural-language-reports/*path" do
-  forward conn, path, "http://natural-language-report/"
+match "/assistant/*path" do
+  forward conn, path, "http://natural-language-report/assistant/"
 end
 ```
 
-One route to the service root; `POST /ask` is the endpoint.
+One route: the chat's turn endpoint.
 First deploy: `docker compose build natural-language-report`, then
 `docker compose up -d natural-language-report dispatcher`.
 

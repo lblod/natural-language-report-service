@@ -13,7 +13,6 @@ import {
   sparqlEscapeBool,
 } from 'mu';
 
-export const sessionQuery = muQuery;
 export const sessionUpdate = muUpdate;
 export {
   sparqlEscapeUri,
@@ -27,8 +26,8 @@ export {
 // The service's own scope. Reads the LLM drives during refinement (code
 // lists, lookup_values) run under this scope, not the caller's session. The
 // sparql-parser config grants this scope read access to the public graph
-// only, so refinement reads only public data. Execution (run_report) still
-// runs as the caller. Set to match the with-scope grant in config.lisp.
+// only, so refinement reads only public data. Execution still runs as the
+// caller. Set to match the with-scope grant in config.lisp.
 export const SERVICE_SCOPE =
   process.env.SERVICE_SCOPE || 'http://services.semantic.works/natural-language-report';
 
@@ -36,8 +35,3 @@ export const SERVICE_SCOPE =
 // accept { scope } on mu-javascript-template >= 1.9.0.
 export function scopedQuery(q) { return muQuery(q, { scope: SERVICE_SCOPE }); }
 export function scopedUpdate(q) { return muUpdate(q, { scope: SERVICE_SCOPE }); }
-
-// The store's error text may name graphs or internals we do not pass on.
-export function stripStoreError(text) {
-  return String(text).split('\n')[0].slice(0, 300);
-}
