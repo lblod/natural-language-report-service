@@ -115,7 +115,7 @@ function pathsResolve(spec, profile, maxPathDepth) {
   const startShapeUri = startShapeOf(spec, profile);
   for (const col of spec.columns) {
     const err = walk(profile, startShapeUri, col.path, maxPathDepth,
-      `column "${col.label}"`, true);
+      `column "${col.label}"`, true, col.nodeKind === SH + 'IRI');
     if (err) return err;
   }
   for (const [i, filter] of spec.filters.entries()) {
@@ -165,6 +165,9 @@ function columnPure(spec) {
     if (Object.keys(col.constraints || {}).length) {
       const which = Object.keys(col.constraints)[0];
       return `a column carries ${which}. Constraints belong in sh:property, or in rep:where for a condition on a step of this column.`;
+    }
+    if (col.nodeKind && col.nodeKind !== SH + 'IRI') {
+      return `column "${col.label}" has sh:nodeKind <${col.nodeKind}>. A column takes only sh:nodeKind sh:IRI, to show the URI of the node its path ends on.`;
     }
     if (col.collect && ![SH + 'groupConcat', SH + 'min', SH + 'max', REP + 'row'].includes(col.collect)) {
       return `column "${col.label}" has an unknown rep:collect <${col.collect}>. Use sh:groupConcat (joins the values), rep:row or nothing (each value gets its own row), sh:min or sh:max.`;
@@ -365,7 +368,7 @@ function shapeAfter(profile, startShapeUri, hops) {
   return shapeUri;
 }
 
-function walk(profile, startShapeUri, hops, maxPathDepth, what, isColumn) {
+function walk(profile, startShapeUri, hops, maxPathDepth, what, isColumn, wantsIri = false) {
   if (hops.length > maxPathDepth) {
     return `${what} walks ${hops.length} hops. The limit is ${maxPathDepth}.`;
   }
@@ -386,11 +389,14 @@ function walk(profile, startShapeUri, hops, maxPathDepth, what, isColumn) {
       }
       shapeUri = f.node;
     } else if (isColumn) {
-      if (!f.datatype && !f.class) {
+      if (wantsIri && f.datatype) {
+        return `column "${colLabel(what)}" has sh:nodeKind sh:IRI but ends on the value "${f.name}", which is no URI. Drop sh:nodeKind.`;
+      }
+      if (!wantsIri && !f.datatype && !f.class) {
         const valueFields = fieldsOf(profile, f.node)
           .filter(x => x.datatype || x.class)
           .map(x => `${x.name} (${x.path})`);
-        return `column "${colLabel(what)}" ends on a link. Add a hop: ${valueFields.join(' or ')}.`;
+        return `column "${colLabel(what)}" ends on a link. Add a hop: ${valueFields.join(' or ')}. Only if the user asked for the URI of that node itself, add sh:nodeKind sh:IRI to the column instead.`;
       }
     }
   }

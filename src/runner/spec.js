@@ -87,6 +87,8 @@ function parseColumn(store, col) {
     label: store.getQuads(col, RDFS_LABEL, null)[0]?.object.value || null,
     collect: store.getQuads(col, REP + 'collect', null)[0]?.object.value || null,
     separator: store.getQuads(col, SH + 'separator', null)[0]?.object.value || null,
+    // sh:nodeKind sh:IRI: the column shows the URI of the node it ends on
+    nodeKind: store.getQuads(col, SH + 'nodeKind', null)[0]?.object.value || null,
     constraints: readConstraints(store, col),   // kept so check.js can refuse it
     where: readWhere(store, col),
   };

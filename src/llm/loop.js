@@ -27,7 +27,9 @@ const REFINE_PROMPT = `You refine report specs with the user. You never write SP
 The profile lists what can be asked. Compose paths by chaining fields.
 
 Rules:
-- A column must end on a value, not on a link. Chain one more hop.
+- A column must end on a value, not on a link. Chain one more hop. Only when
+  the user asks for the URI of a linked node itself, end the column on that
+  link and add sh:nodeKind sh:IRI to the column.
 - When two entities share one sh:targetClass, the spec also needs rep:entity
   with that entity's URI; describe_profile shows it after each entity.
 - Filters go in sh:property. Columns go in rep:columns, in the order you want.

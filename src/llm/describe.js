@@ -68,6 +68,7 @@ export function describeProfile(profile, codeLists = {}) {
   lines.push('  sh:property [ ... ] ;   # filters, optional');
   lines.push('  rep:columns ( [ sh:path ( ... ) ; rdfs:label "..." ] ... ) .');
   lines.push('Every column ends on a value field. Use rep:self as sh:path for the subject URI.');
+  lines.push('For the URI of a linked node, end the column on that link and add sh:nodeKind sh:IRI to the column.');
   lines.push('');
   lines.push('sh:targetClass is the full URI in brackets after the entity below.');
   lines.push('In sh:path, use the predicate URI shown after each field name, not the field name itself.');
