@@ -20,7 +20,7 @@ export async function run(query, update, parsed, profile, title, extra = {}, onP
   await fetchColumns(query, subjects, parsed, values, null, onProgress);
 
   const rows = assemble(subjects, values, parsed);
-  const fileName = `${slug(title)}.csv`;
+  const fileName = extra.fileName || `${slug(title)}.csv`;
   const csv = rowsToCsv(rows);
   const filePath = writeCsv(fileName, csv);
   const specFile = extra.spec && writeSpec(fileName, extra.spec);

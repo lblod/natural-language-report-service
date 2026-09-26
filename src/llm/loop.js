@@ -201,6 +201,8 @@ export async function chat(messages, { tools = null, toolChoice = 'auto' } = {})
   if (LOG_LLM) {
     console.log(`[llm] POST ${LLM_BASE_URL}/chat/completions request:\n${
       JSON.stringify(body, null, 2)}`);
+  } else {
+    console.log('[llm] sending instructions to llm');
   }
   const res = await fetch(`${LLM_BASE_URL}/chat/completions`, {
     method: 'POST',

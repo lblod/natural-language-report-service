@@ -14,7 +14,7 @@ import { checkSpec } from '../runner/check.js';
 import { parseSpec } from '../runner/spec.js';
 import { describeProfile, codeListValues } from './describe.js';
 import { lookupValues } from './lookup.js';
-import { run, slug } from '../runner/run.js';
+import { run } from '../runner/run.js';
 import { scopedQuery } from '../db.js';
 import { readFileSync } from 'fs';
 import { ATTACHMENT_TYPES } from '../chat/vocab.js';
@@ -81,7 +81,6 @@ export function buildTools(profiles, session, mode = 'refine') {
     try {
       // The spec's dct:title names the report.
       const name = parsed.title || 'report';
-      await session.onReportStart?.({ title: name, fileName: `${slug(name)}.csv` });
       const waiter = newRunWaiter(RUN_TIMEOUT);
       const running = run(session.query, session.update, parsed, p, name, { spec, fileType: ATTACHMENT_TYPES.result }, waiter.tick);
       // The end callback also fires after the wait gave up: the run is not
