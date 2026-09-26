@@ -5,8 +5,7 @@
 import { parseSpec } from '../runner/spec.js';
 import { checkSpec, whereNotes, profileError } from '../runner/check.js';
 import { describeProfile } from './describe.js';
-import { lookupValues } from './lookup.js';
-import { exploreClass, sampleSpec } from './explore.js';
+import { lookupValues, exploreClass, sampleSpec } from './explore.js';
 import { readSpecFile } from '../chat.js';
 
 // The tool definitions sent to the model. The descriptions are what the LLM

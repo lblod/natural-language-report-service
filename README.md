@@ -94,7 +94,7 @@ only; it is not the report. `validate_spec` still says where each
 
 The LLM's own reads during refinement (`describe_profile`'s code lists,
 `lookup_values`, `explore_data` and `sample_spec`) run under a service
-scope, not the caller's session: `publicQuery` in `src/llm/lookup.js`. mu's
+scope, not the caller's session: `publicQuery` in `src/llm/explore.js`. mu's
 `query(q, { scope })` sends `mu-auth-scope`; the sparql-parser config grants
 that scope read access to `http://mu.semte.ch/graphs/public` only. So
 refinement reads only the public graph, regardless of who calls. Execution
@@ -149,7 +149,7 @@ user sees is Dutch.
 | `SEED_PAGE_SIZE` | `5000` | seed page size |
 | `SUBJECT_CHUNK_SIZE` | `100` | see above |
 | `SHARE_DIR` | `/share` | where CSVs are written |
-| `CHAT_ASSISTANT_URI` | — | the `prov:SoftwareAgent` that signs assistant messages; found by lookup when unset |
+| `CHAT_ASSISTANT_URI` | `http://data.lblod.info/id/chat-agents/rapportassistent` | the `prov:SoftwareAgent` that signs assistant messages (the portal's chat-assistant migration seeds it) |
 | `CHAT_HISTORY_LIMIT` | `20` | messages of history a turn reads |
 | `SERVICE_SCOPE` | `http://services.semantic.works/natural-language-report` | the mu-auth-scope for the LLM's own reads (code lists, `lookup_values`, `explore_data`, `sample_spec`). Must match the `with-scope` grant in the app's sparql-parser config. |
 

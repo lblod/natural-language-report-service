@@ -1,12 +1,14 @@
 import { app, errorHandler } from 'mu';
 import bodyParser from 'body-parser';
 import { loadProfiles } from './src/runner/profile.js';
-import { readConversation, readHistory, findAssistant, writeMessage } from './src/chat.js';
+import { readConversation, readHistory, writeMessage } from './src/chat.js';
 import { wantsExecution } from './src/llm/mode.js';
 import { executeSpec, refineSpec } from './src/report-assistant.js';
 
 const PROFILE_DIR = process.env.PROFILE_DIR || '/config/profiles';
-const CHAT_ASSISTANT_URI = process.env.CHAT_ASSISTANT_URI;
+// The agent that signs the assistant's messages, seeded by the portal's
+// chat-assistant migration.
+const CHAT_ASSISTANT_URI = process.env.CHAT_ASSISTANT_URI || 'http://data.lblod.info/id/chat-agents/rapportassistent';
 const TITLE_LENGTH = 80;
 const FAILED = 'Er ging iets mis. Probeer het opnieuw.';
 
@@ -22,13 +24,12 @@ app.post('/assistant/conversations/:id/turns', bodyParser.json(), async function
   const content = String(req.body?.content ?? '').trim();
   if (!content) return res.status(400).json({ error: 'content is required' });
 
-  let conversation, assistant, history, question;
+  let conversation, history, question;
   try {
     // the access check: the caller's session decides what is readable
     conversation = await readConversation(req.params.id);
     if (!conversation) return res.status(404).json({ error: 'no such conversation' });
-    assistant = CHAT_ASSISTANT_URI || await findAssistant();
-    history = await readHistory(conversation.uri, assistant);
+    history = await readHistory(conversation.uri, CHAT_ASSISTANT_URI);
     question = await writeMessage({
       conversationUri: conversation.uri,
       content,
@@ -50,13 +51,13 @@ app.post('/assistant/conversations/:id/turns', bodyParser.json(), async function
     await writeMessage({
       conversationUri: conversation.uri,
       content: answer.text,
-      maker: assistant,
+      maker: CHAT_ASSISTANT_URI,
       attachments: answer.attachments,
     });
   } catch (e) {
     console.error('[chat] turn failed:', e);
     try {
-      await writeMessage({ conversationUri: conversation.uri, content: FAILED, maker: assistant });
+      await writeMessage({ conversationUri: conversation.uri, content: FAILED, maker: CHAT_ASSISTANT_URI });
     } catch (e2) {
       console.error('[chat] could not write the failure message:', e2);
     }

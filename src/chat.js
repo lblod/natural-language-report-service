@@ -25,7 +25,6 @@ const T = {
   created: 'http://purl.org/dc/terms/created',
   maker: 'http://xmlns.com/foaf/0.1/maker',
   attachment: 'https://www.w3.org/ns/activitystreams#attachment',
-  softwareAgent: 'http://www.w3.org/ns/prov#SoftwareAgent',
   file: 'http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#FileDataObject',
   fileName: 'http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#fileName',
   fileSize: 'http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#fileSize',
@@ -107,17 +106,6 @@ export async function readHistory(conversationUri, assistantUri) {
     }
   }
   return messages.slice(-HISTORY_LIMIT);
-}
-
-// The one assistant the caller can read. Throws unless there is exactly one.
-export async function findAssistant() {
-  const json = await query(`
-    SELECT ?agent WHERE { ?agent ${u(T.type)} ${u(T.softwareAgent)} . } LIMIT 2`);
-  const rows = bindings(json);
-  if (rows.length !== 1) {
-    throw new Error(`expected one prov:SoftwareAgent, found ${rows.length}; seed one or set CHAT_ASSISTANT_URI`);
-  }
-  return rows[0].agent.value;
 }
 
 // --- writes -------------------------------------------------------------------
