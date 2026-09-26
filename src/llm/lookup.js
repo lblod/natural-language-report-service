@@ -1,7 +1,8 @@
-// The LLM's own reads: code lists. They run under the service scope, not
-// the caller's session; the sparql-parser config grants that scope read
-// access to the public graph only, so they read the same for every caller.
-// Execution still runs as the caller.
+// The LLM's own reads: code lists here, the data samples in explore.js.
+// They run under the service scope, not the caller's session; the
+// sparql-parser config grants that scope read access to the public graph
+// only, so they read the same for every caller. Execution still runs as the
+// caller.
 //
 // lookup_values is a suggest helper, not a spec check. It reads candidate
 // values the LLM can put in a filter; it never runs the spec and never sees
@@ -17,7 +18,7 @@ const LIMIT = 25;
 // class → { values, at }. Refreshed lazily when stale.
 const cache = new Map();
 
-function publicQuery(q) {
+export function publicQuery(q) {
   return query(q, { scope: SERVICE_SCOPE });
 }
 

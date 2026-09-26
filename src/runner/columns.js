@@ -52,7 +52,7 @@ export function groupQuery(group, chunk) {
   return `SELECT ?s ?v WHERE {\n  VALUES ?s { ${subjects} }\n  ${lines.join('\n  ')}\n}`;
 }
 
-function collect(result, group, values) {
+export function collect(result, group, values) {
   for (const b of result.results.bindings) {
     let perColumn = values.get(b.s.value);
     if (!perColumn) { perColumn = new Map(); values.set(b.s.value, perColumn); }

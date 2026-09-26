@@ -1,11 +1,12 @@
 // The tools the LLM calls, refinement only: list_profiles,
-// describe_profile, validate_spec, read_spec and lookup_values. Each returns
-// plain text for the model. No report is created, no spec is evaluated;
-// the code-list reads run under the service scope (public graph).
+// describe_profile, validate_spec, read_spec, lookup_values, explore_data
+// and sample_spec. Each returns plain text for the model. No report is
+// created; the database reads run under the service scope (public graph).
 import { parseSpec } from '../runner/spec.js';
 import { checkSpec, whereNotes, profileError } from '../runner/check.js';
 import { describeProfile } from './describe.js';
 import { lookupValues } from './lookup.js';
+import { exploreClass, sampleSpec } from './explore.js';
 import { readSpecFile } from '../chat.js';
 
 // The tool definitions sent to the model. The descriptions are what the LLM
@@ -30,6 +31,15 @@ export const TOOLS = [
       field: 'The field as "entityLabel.fieldLabel", e.g. "bestuurseenheid.naam"',
       term: 'The Dutch word or name to search for',
     }),
+  tool('explore_data',
+    'Show a sample of the public data of one sh:targetClass of the profile: the predicates its instances use (outgoing and incoming), a few example values, the class of linked nodes, and which profile field each predicate is. Call it again on a linked class to follow a path. A predicate not in the profile cannot be used in a spec. A sample, not a check: it never runs a spec and counts nothing.',
+    {
+      profile_id: 'The profile URI returned by list_profiles',
+      class: 'The sh:targetClass URI, as describe_profile shows it',
+    }),
+  tool('sample_spec',
+    'Run a spec that passes validate_spec on the public data and return the rows of up to 10 subjects it finds there. Use it to see whether its paths and filters land where you expect. Public data only: the report runs as the user and may find other rows, so an empty or short sample says nothing about the report. It does not attach the spec; validate_spec does.',
+    { spec: 'The spec as Turtle text' }),
 ];
 
 function tool(name, description, params) {
@@ -54,6 +64,8 @@ export async function runTool(name, args, profiles) {
     case 'validate_spec': return validateSpec(args, profiles);
     case 'read_spec': return readSpec(args);
     case 'lookup_values': return lookup(args, profiles);
+    case 'explore_data': return explore(args, profiles);
+    case 'sample_spec': return sample(args, profiles);
     default: return `unknown tool "${name}"`;
   }
 }
@@ -88,4 +100,22 @@ async function lookup({ profile_id, field, term }, profiles) {
   if (error) return error;
   if (!term) return 'no term to search for.';
   return lookupValues(profiles.get(profile_id), field, term);
+}
+
+async function explore({ profile_id, class: cls }, profiles) {
+  const error = profileError(profiles, profile_id);
+  if (error) return error;
+  return exploreClass(profiles.get(profile_id), cls);
+}
+
+async function sample({ spec }, profiles) {
+  let parsed;
+  try {
+    parsed = parseSpec(spec);
+  } catch (e) {
+    return `the spec did not parse: ${e.message}`;
+  }
+  const error = checkSpec(parsed, profiles);
+  if (error) return error;
+  return sampleSpec(parsed, profiles.get(parsed.profileUri));
 }
