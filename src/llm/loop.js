@@ -8,7 +8,8 @@
 // confirm before anything executes; execution runs the agreed spec without
 // the LLM (../report-assistant.js).
 
-import { buildTools } from './tools.js';
+import { TOOLS, runTool } from './tools.js';
+import { SPEC_MEDIA_TYPE } from '../chat.js';
 
 const MAX_ROUNDS = Number(process.env.MAX_ROUNDS || 12);
 const LLM_BASE_URL = process.env.LLM_BASE_URL;
@@ -77,70 +78,49 @@ what it says, up to three rounds. Then propose and stop.
 
 Reply to the user in Dutch. Earlier turns are context only. Answer the last one.`;
 
-// ask(questionOrMessages, profiles, session) → { text }
-// A string is one question; an array is the conversation so far,
-// [{ role, content }], newest last. The system prompt is always this file's
-// own; a system message in the input is dropped.
-export async function ask(questionOrMessages, profiles, session) {
-  const turns = typeof questionOrMessages === 'string'
-    ? [{ role: 'user', content: questionOrMessages }]
-    : questionOrMessages.filter(m => m.role !== 'system');
+// ask(turns, profiles) → { text, spec }. turns is the conversation so far,
+// [{ role, content, attachments }], newest last. spec is the last spec
+// validate_spec accepted in this turn, or null.
+export async function ask(turns, profiles) {
+  const messages = [{ role: 'system', content: REFINE_PROMPT }, ...turns.map(withSpecHint)];
+  let spec = null;
 
-  return runLoop(withAttachmentSpecs(turns), profiles, session);
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const { message } = await chat(messages, TOOLS);
+    messages.push(message);
+    const calls = message.tool_calls || [];
+    if (!calls.length) return { text: message.content || '', spec };
+
+    for (const call of calls) {
+      const args = parseArgs(call.function.arguments);
+      let result;
+      try {
+        result = await runTool(call.function.name, args, profiles);
+      } catch (e) {
+        result = `tool failed: ${String(e.message || e).split('\n')[0]}`;
+      }
+      // validate_spec answers "ok" (plus notes) when the spec checks out;
+      // that spec becomes the bijlage of the answer.
+      if (call.function.name === 'validate_spec' && /^ok(\n|$)/.test(result)) spec = args.spec;
+      messages.push({ role: 'tool', tool_call_id: call.id, content: result });
+    }
+  }
+  return { text: 'Sorry, dit rapport is te moeilijk. Contacteer de developers.', spec };
 }
 
 // The history carries the spec as a bijlage. Paste one hint line per spec
 // under the message text, so the model knows a spec is there and opens it
 // with read_spec; the chat itself still keeps the Turtle out of the text.
-function withAttachmentSpecs(turns) {
-  return turns.map(t => {
-    const specs = (t.attachments || []).filter(a => a.mediaType === 'text/turtle' && a.uri);
-    if (!specs.length) return t;
-    return {
-      ...t,
-      content: `${t.content}\n\n${specs.map(a =>
-        `Bijlage "${a.name}", a spec file (read it with read_spec): ${a.uri}`).join('\n\n')}`,
-    };
-  });
+function withSpecHint(turn) {
+  const specs = (turn.attachments || []).filter(a => a.mediaType === SPEC_MEDIA_TYPE);
+  if (!specs.length) return turn;
+  const hints = specs.map(a => `Bijlage "${a.name}", a spec file (read it with read_spec).`);
+  return { ...turn, content: `${turn.content}\n\n${hints.join('\n\n')}` };
 }
 
-// runLoop drives the agent loop with the refinement prompt and tool set.
-async function runLoop(turns, profiles, session) {
-  const { handlers } = buildTools(profiles, session);
-  const messages = [{ role: 'system', content: REFINE_PROMPT }, ...turns];
-
-  for (let round = 0; round < MAX_ROUNDS; round++) {
-    const reply = await chat(messages, { tools: toolDefs() });
-    messages.push(reply.message);
-    const calls = reply.message.tool_calls || [];
-    if (!calls.length) {
-      return { text: reply.message.content || '' };
-    }
-    for (const call of calls) {
-      const args = parseArgs(call.function.arguments);
-      const fn = handlers.get(call.function.name);
-      let resultText;
-      if (!fn) {
-        resultText = `unknown tool "${call.function.name}"`;
-      } else {
-        try {
-          const out = await fn(args);
-          resultText = out.content?.[0]?.text ?? JSON.stringify(out);
-        } catch (e) {
-          resultText = `tool failed: ${String(e.message || e).split('\n')[0]}`;
-        }
-      }
-      messages.push({ role: 'tool', tool_call_id: call.id, content: resultText });
-    }
-  }
-  return { text: '(loop did not finish)' };
-}
-
-// chat(messages, { tools, toolChoice }) → { message }
-// The one place that talks to the provider. tools null (the default) means a
-// plain completion (the mode classifier); runLoop passes the tool
-// definitions; toolChoice defaults to 'auto'.
-export async function chat(messages, { tools = null, toolChoice = 'auto' } = {}) {
+// chat(messages, tools) → { message }. The one place that talks to the
+// provider. Without tools it is a plain completion (the mode check).
+export async function chat(messages, tools = null) {
   // Send only the fields every provider accepts back.
   const wire = messages.map(m => {
     const out = { role: m.role, content: m.content ?? null };
@@ -154,13 +134,10 @@ export async function chat(messages, { tools = null, toolChoice = 'auto' } = {})
     if (m.role === 'tool' && m.tool_call_id) out.tool_call_id = m.tool_call_id;
     return out;
   });
-  const body = {
-    model: LLM_MODEL,
-    messages: wire,
-  };
+  const body = { model: LLM_MODEL, messages: wire };
   if (tools) {
     body.tools = tools;
-    body.tool_choice = toolChoice === 'auto' ? 'auto' : toolChoice;
+    body.tool_choice = 'auto';
   }
   if (LOG_LLM) {
     console.log(`[llm] POST ${LLM_BASE_URL}/chat/completions request:\n${
@@ -190,17 +167,4 @@ export async function chat(messages, { tools = null, toolChoice = 'auto' } = {})
 function parseArgs(s) {
   if (!s) return {};
   try { return JSON.parse(s); } catch { return {}; }
-}
-
-// The tool definitions sent to the model.
-import { toolSchemas } from './schemas.js';
-function toolDefs() {
-  return toolSchemas().map(t => ({
-    type: 'function',
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: t.inputSchema,
-    },
-  }));
 }

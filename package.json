@@ -9,7 +9,6 @@
     "start": "node app.js"
   },
   "dependencies": {
-    "express": "^5.2.1",
     "n3": "^1.17.0"
   }
 }

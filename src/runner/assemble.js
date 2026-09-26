@@ -14,7 +14,6 @@ export const NUMERIC_DATATYPES = new Set([
   'nonNegativeInteger', 'positiveInteger', 'nonPositiveInteger', 'negativeInteger',
   'unsignedLong', 'unsignedInt', 'unsignedShort', 'unsignedByte',
 ].map(d => XSD + d));
-export const TEMPORAL_DATATYPES = new Set([XSD + 'date', XSD + 'dateTime']);
 
 export function assemble(subjects, values, spec) {
   const sorted = [...subjects].sort();
@@ -57,19 +56,18 @@ function collect(terms, col) {
   }
 }
 
-// min/max over values that share one datatype. Numbers compare as numbers,
-// dates and times as instants. Mixed datatypes throw: check.js should have
-// caught it, and a silently wrong cell is worse than a failed job.
+// min/max. Numbers compare as numbers. Dates and times compare as text:
+// xsd:date and xsd:dateTime are ISO strings, so text order is date order.
+// Numbers mixed with other values throw: check.js should have caught it,
+// and a silently wrong cell is worse than a failed job. The terms are SPARQL
+// JSON bindings, so the datatype is a plain string.
 function extreme(terms, col, direction) {
   if (!terms.length) return '';
-  const datatypes = [...new Set(terms.map(t => t.datatype?.value || ''))];
-  if (datatypes.length > 1) {
-    throw new Error(`column "${col.label}" asks for sh:${direction < 0 ? 'min' : 'max'} but its values carry ${datatypes.length} datatypes (${datatypes.join(', ')}).`);
+  const numbers = terms.filter(t => NUMERIC_DATATYPES.has(t.datatype)).length;
+  if (numbers && numbers < terms.length) {
+    throw new Error(`column "${col.label}" asks for sh:${direction < 0 ? 'min' : 'max'} but mixes numbers with other values.`);
   }
-  const dt = datatypes[0];
-  const key = NUMERIC_DATATYPES.has(dt) ? t => Number(t.value)
-    : TEMPORAL_DATATYPES.has(dt) ? t => new Date(t.value).getTime()
-    : t => t.value;
+  const key = numbers ? t => Number(t.value) : t => t.value;
   const cmp = (a, b) => a < b ? -1 : a > b ? 1 : 0;
   const best = terms.reduce((a, b) => (cmp(key(b), key(a)) * direction > 0 ? b : a));
   return best.value;

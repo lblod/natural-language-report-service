@@ -44,6 +44,7 @@ Two documents drive everything:
 A **profile** is a SHACL shapes graph: one `sh:NodeShape` per entity, fields
 as `sh:property`, code lists via `sh:class`, links via `sh:node`. The service
 ships no profile and knows no vocabulary; profiles live in the app repo.
+Profiles load at boot; a broken profile stops the service.
 
 A **spec** is `rep:ReportSpec` + `sh:NodeShape`: `sh:property` selects the
 subjects, `rep:columns` says what the CSV holds. The two never interact. The
@@ -107,13 +108,11 @@ The scope URI is `SERVICE_SCOPE` (default
 POST /assistant/conversations/:id/turns      { content }           → 202 { id }
 ```
 
-This is the chat. The turn module in
-`src/chat/` is generic — it imports nothing from `src/llm/` or `src/runner/`
-and moves between services without edits — and `src/report-assistant.js` is
-this service's one `answer` hook. It records the question, answers `202` with
-the message id, then classifies the turn and refines or executes with the
-conversation's history. The answer and its bijlagen are written when the turn
-ends. The browser polls
+This is the chat. The route is in `app.js`: it records the question, answers
+`202` with the message id, then classifies the turn and refines or executes
+(`src/report-assistant.js`) with the conversation's history. The
+conversation, message and bijlage reads and writes are in `src/chat.js`. The
+answer and its bijlagen are written when the turn ends. The browser polls
 `/chat-conversations/:id?include=messages.attachments` and finds the answer
 that way. Failure is a message, never a silent loader.
 

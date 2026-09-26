@@ -25,43 +25,18 @@ Rules:
 Reply with exactly one token: true or false. No other words, no punctuation,
 no markdown.`;
 
-// classifyMode(turns) → boolean (true = execute now)
-// turns: [{ role, content }], newest last. A leading system message is
-// dropped; the assistant's own system prompt is never sent to the model.
-export async function classifyMode(turns) {
-  const convo = (turns || [])
-    .filter(m => m.role !== 'system')
-    .map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content ?? '' }));
-  if (!convo.length) return false;
-
-  // Keep the last few turns; the decision is about the latest message.
-  const recent = convo.slice(-6);
-  const messages = [{ role: 'system', content: MODE_PROMPT }, ...recent];
-  let raw;
+// wantsExecution(turns) → true when the user's last message says "run it
+// now". turns: [{ role, content }], newest last; the last few are enough.
+export async function wantsExecution(turns) {
+  let message;
   try {
-    const reply = await chat(messages, { tools: null });
-    raw = firstText(reply.message);
+    ({ message } = await chat([{ role: 'system', content: MODE_PROMPT }, ...turns.slice(-6)]));
   } catch (e) {
-    // The classifier call failed (no LLM, provider down). Default to refine:
-    // safer than running a report on a guess, and the refine loop will
-    // surface the real error to the user.
+    // The call failed (no LLM, provider down). Refine: safer than running a
+    // report on a guess, and the refine loop will surface the real error.
     return false;
   }
-  const text = stripMarkdown(raw).trim().toLowerCase();
-  if (!text) return false;
-  if (text.startsWith('true')) return true;
-  if (text.startsWith('false')) return false;
-  // A JSON {"execute": ...} shape some models emit.
-  try {
-    const m = text.match(/\{[\s\S]*\}/);
-    if (m) {
-      const v = JSON.parse(m[0]);
-      if (typeof v === 'boolean') return v;
-      if (v && typeof v.execute === 'boolean') return v.execute;
-      if (v && typeof v.refine === 'boolean') return !v.refine;
-    }
-  } catch { /* ignore */ }
-  return false;
+  return stripMarkdown(firstText(message)).trim().toLowerCase().startsWith('true');
 }
 
 // Reasoning models may leave `content` empty and put the visible text in a

@@ -1,25 +1,66 @@
 import { app, errorHandler } from 'mu';
+import bodyParser from 'body-parser';
 import { loadProfiles } from './src/runner/profile.js';
-import { mountChat } from './src/chat/index.js';
-import { reportAssistant } from './src/report-assistant.js';
+import { readConversation, readHistory, findAssistant, writeMessage } from './src/chat.js';
+import { wantsExecution } from './src/llm/mode.js';
+import { executeSpec, refineSpec } from './src/report-assistant.js';
 
 const PROFILE_DIR = process.env.PROFILE_DIR || '/config/profiles';
+const CHAT_ASSISTANT_URI = process.env.CHAT_ASSISTANT_URI;
+const TITLE_LENGTH = 80;
+const FAILED = 'Er ging iets mis. Probeer het opnieuw.';
 
-// Profiles load at boot; handlers await the same promise. A failed load
-// answers an error per request instead of crashing boot.
-let profilesPromise = loadProfiles(PROFILE_DIR);
-profilesPromise.catch(e => console.error('[profiles] loading failed:', e.message));
+// Profiles load at boot. A broken profile stops the service.
+const profiles = loadProfiles(PROFILE_DIR);
 
-async function whenProfiles() {
+// One chat turn. Records the question, answers 202, then writes the
+// assistant's answer; the frontend polls the conversation for it. mu's
+// query/update run as the caller for the whole turn, also after the 202.
+// The template only parses application/vnd.api+json, the chat sends
+// application/json.
+app.post('/assistant/conversations/:id/turns', bodyParser.json(), async function(req, res) {
+  const content = String(req.body?.content ?? '').trim();
+  if (!content) return res.status(400).json({ error: 'content is required' });
+
+  let conversation, assistant, history, question;
   try {
-    return await profilesPromise;
+    // the access check: the caller's session decides what is readable
+    conversation = await readConversation(req.params.id);
+    if (!conversation) return res.status(404).json({ error: 'no such conversation' });
+    assistant = CHAT_ASSISTANT_URI || await findAssistant();
+    history = await readHistory(conversation.uri, assistant);
+    question = await writeMessage({
+      conversationUri: conversation.uri,
+      content,
+      maker: conversation.creator,
+      title: conversation.title ? undefined : content.slice(0, TITLE_LENGTH),
+    });
   } catch (e) {
-    throw new Error('profiles are not available: ' + e.message);
+    console.error('[chat] could not record the question:', e);
+    return res.status(500).json({ error: e.message });
   }
-}
 
-// The chat. reportAssistant is the answer hook: it refines the spec with the
-// LLM, or runs the agreed spec without it.
-mountChat(app, { path: '/assistant', answer: reportAssistant(whenProfiles) });
+  res.status(202).json({ id: question.id });
+
+  try {
+    const turns = [...history, { role: 'user', content }];
+    const answer = await wantsExecution(turns)
+      ? await executeSpec(history, conversation.title, profiles)
+      : await refineSpec(turns, profiles);
+    await writeMessage({
+      conversationUri: conversation.uri,
+      content: answer.text,
+      maker: assistant,
+      attachments: answer.attachments,
+    });
+  } catch (e) {
+    console.error('[chat] turn failed:', e);
+    try {
+      await writeMessage({ conversationUri: conversation.uri, content: FAILED, maker: assistant });
+    } catch (e2) {
+      console.error('[chat] could not write the failure message:', e2);
+    }
+  }
+});
 
 app.use(errorHandler);

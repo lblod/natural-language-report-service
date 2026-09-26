@@ -1,5 +1,5 @@
-import { sparqlEscapeUri } from '../db.js';
-import { wherePatterns } from './seed.js';
+import { query, sparqlEscapeUri } from 'mu';
+import { hopsPattern, wherePatterns } from './seed.js';
 
 // Fetch column values for known subjects. Columns are grouped by their
 // shared non-leaf hops; two columns share a query only when every hop
@@ -8,12 +8,14 @@ import { wherePatterns } from './seed.js';
 
 const SUBJECT_CHUNK_SIZE = Math.max(1, Number(process.env.SUBJECT_CHUNK_SIZE) || 100);
 
-export async function fetchColumns(sessionQuery, subjects, spec, values = new Map()) {
+// fetchColumns(subjects, spec) → subject → column index → [term]
+export async function fetchColumns(subjects, spec) {
+  const values = new Map();
   const groups = groupColumns(spec.columns);
   for (const group of groups) {
     for (let i = 0; i < subjects.length; i += SUBJECT_CHUNK_SIZE) {
       const chunk = subjects.slice(i, i + SUBJECT_CHUNK_SIZE);
-      const result = await sessionQuery(groupQuery(group, chunk));
+      const result = await query(groupQuery(group, chunk));
       collect(result, group, values);
     }
   }
@@ -41,21 +43,11 @@ export function groupColumns(columns) {
 
 export function groupQuery(group, chunk) {
   const subjects = chunk.map(sparqlEscapeUri).join(' ');
-  const lines = [];
-  let prev = '?s';
   // every hop except the last gets its own variable; the leaf is ?v
-  group.hops.slice(0, -1).forEach((hop, i) => {
-    const v = `?x${i}`;
-    if (hop.inverse) lines.push(`${v} ${sparqlEscapeUri(hop.predicate)} ${prev} .`);
-    else lines.push(`${prev} ${sparqlEscapeUri(hop.predicate)} ${v} .`);
-    prev = v;
-  });
-  const leaf = group.hops[group.hops.length - 1];
-  if (leaf.inverse) lines.push(`?v ${sparqlEscapeUri(leaf.predicate)} ${prev} .`);
-  else lines.push(`${prev} ${sparqlEscapeUri(leaf.predicate)} ?v .`);
-  // rep:where hangs on the column's own nodes: ?x<k-1> after k hops, ?v at
+  const lines = [hopsPattern(group.hops, 'x', '?s', '?v')];
+  // rep:where hangs on the column's own nodes: ?x_<k> after k hops, ?v at
   // the end.
-  const nodeVar = (k) => (k === group.hops.length ? '?v' : `?x${k - 1}`);
+  const nodeVar = (k) => (k === group.hops.length ? '?v' : `?x_${k}`);
   lines.push(...wherePatterns(group.where, group.hops, nodeVar, 'c'));
   return `SELECT ?s ?v WHERE {\n  VALUES ?s { ${subjects} }\n  ${lines.join('\n  ')}\n}`;
 }

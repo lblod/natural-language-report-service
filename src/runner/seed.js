@@ -1,16 +1,15 @@
-import { sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime, sparqlEscapeDate } from '../db.js';
+import { query, sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime, sparqlEscapeDate } from 'mu';
 import { sharedSteps } from './spec.js';
 
 // Subject selection. One paged query per page; stops at ROW_LIMIT.
 const ROW_LIMIT = Number(process.env.ROW_LIMIT || 200000);
 const PAGE_SIZE = Number(process.env.SEED_PAGE_SIZE || 5000);
 
-export async function seed(sessionQuery, spec, shape = null) {
+export async function seed(spec, shape) {
   const subjects = [];
   let offset = 0;
   for (;;) {
-    const query = seedPageQuery(spec, PAGE_SIZE, offset, shape);
-    const result = await sessionQuery(query);
+    const result = await query(seedPageQuery(spec, PAGE_SIZE, offset, shape));
     const rows = result.results.bindings.map(b => b.s.value);
     subjects.push(...rows);
     if (subjects.length > ROW_LIMIT) {
@@ -49,13 +48,13 @@ function discriminatorPattern(d) {
 // Writes out every hop as its own triple pattern.
 // Forward:  ?s <p1> ?f0_1 . ?f0_1 <p2> ?f0_v
 // Inverse:  ?s ^<p1> → ?f0_1 <p1> ?s
-export function hopsPattern(hops, varPrefix, startVar) {
+export function hopsPattern(hops, varPrefix, startVar, lastVar = `?${varPrefix}_v`) {
   let prev = startVar;
   const patterns = [];
   for (let i = 0; i < hops.length; i++) {
     const hop = hops[i];
     const isLast = i === hops.length - 1;
-    const v = isLast ? `?${varPrefix}_v` : `?${varPrefix}_${i + 1}`;
+    const v = isLast ? lastVar : `?${varPrefix}_${i + 1}`;
     if (hop.inverse) {
       patterns.push(`${v} ${sparqlEscapeUri(hop.predicate)} ${prev} .`);
     } else {
@@ -114,27 +113,12 @@ export function conditionPattern(c, varPrefix, hops, startVar) {
     parts.push(`FILTER(REGEX(str(${v}), ${sparqlEscapeString(alternation)}${flags}))`);
   }
   if (c.minCount === 2) {
-    // two distinct leaf values on the same path
+    // two distinct leaf values: the same path again, to a second leaf
     const w = `?${varPrefix}_w`;
-    parts.push(hopsPattern2(hops, varPrefix, startVar, w));
+    parts.push(hopsPattern(hops, `${varPrefix}_2`, startVar, w));
     parts.push(`FILTER(${v} != ${w})`);
   }
   return parts.join('\n  ');
-}
-
-function hopsPattern2(hops, varPrefix, startVar, wVar) {
-  // repeat the path to a second leaf variable
-  let prev = startVar;
-  const patterns = [];
-  for (let i = 0; i < hops.length; i++) {
-    const hop = hops[i];
-    const isLast = i === hops.length - 1;
-    const v = isLast ? wVar : `?${varPrefix}_2_${i + 1}`;
-    if (hop.inverse) patterns.push(`${v} ${sparqlEscapeUri(hop.predicate)} ${prev} .`);
-    else patterns.push(`${prev} ${sparqlEscapeUri(hop.predicate)} ${v} .`);
-    prev = v;
-  }
-  return patterns.join('\n  ');
 }
 
 function escapeTerm(t) {

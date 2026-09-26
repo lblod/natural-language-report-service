@@ -1,94 +1,91 @@
-// The tools the LLM calls, refinement only: list_profiles, describe_profile,
-// validate_spec, lookup_values, read_spec. lookup_values searches a code list
-// under the service scope (public graph) and returns candidate values, so the
-// LLM can suggest concrete filter values. No report is created, no spec is
-// evaluated.
-//
-// The shape every tool returns is { content: [{ type: 'text', text }] },
-// which the loop passes straight back to the model.
-
-import { checkSpec, whereNotes } from '../runner/check.js';
+// The tools the LLM calls, refinement only: list_profiles,
+// describe_profile, validate_spec, read_spec and lookup_values. Each returns
+// plain text for the model. No report is created, no spec is evaluated;
+// the code-list reads run under the service scope (public graph).
 import { parseSpec } from '../runner/spec.js';
-import { describeProfile, codeListValues } from './describe.js';
+import { checkSpec, whereNotes, profileError } from '../runner/check.js';
+import { describeProfile } from './describe.js';
 import { lookupValues } from './lookup.js';
-import { scopedQuery } from '../db.js';
-import { readFileSync } from 'fs';
+import { readSpecFile } from '../chat.js';
 
-const MAX_PATH_DEPTH = Number(process.env.MAX_PATH_DEPTH || 8);
+// The tool definitions sent to the model. The descriptions are what the LLM
+// reads to decide which tool to call.
+export const TOOLS = [
+  tool('list_profiles',
+    'List the report profiles available, with their id and title.',
+    {}),
+  tool('describe_profile',
+    'Describe one profile: its entities, fields, relations and labels. Inline the values of short code lists.',
+    { profile_id: 'The profile URI returned by list_profiles' }),
+  tool('validate_spec',
+    'Validate a report spec (Turtle). Returns "ok", followed by one line per rep:where saying where it applies, or one clear sentence saying what is wrong and what to write instead. No database is touched.',
+    { spec: 'The spec as Turtle text' }),
+  tool('read_spec',
+    'Return the Turtle of a spec bijlage, a ttl file attached to an earlier message in this conversation. Use it to reuse the agreed spec, or to read back an earlier proposal before you change it. Read-only.',
+    { file_name: 'The file name of the spec bijlage, e.g. specificatie-<uuid>.ttl' }),
+  tool('lookup_values',
+    'Search a code list for a term so you can suggest concrete values for a filter (for sh:hasValue or sh:in). Returns up to 25 matches with their URIs and labels, a total, and an exact flag when a label equals the term. Reads candidate values only; it never runs the spec and never tells you how many subjects a spec would match. Read-only, no report is created.',
+    {
+      profile_id: 'The profile URI returned by list_profiles',
+      field: 'The field as "entityLabel.fieldLabel", e.g. "bestuurseenheid.naam"',
+      term: 'The Dutch word or name to search for',
+    }),
+];
 
-// buildTools(profiles, session) → { handlers }
-export function buildTools(profiles, session) {
-  const profileList = () => [...profiles.values()].map(p => ({ id: p.uri, title: p.title }));
-
-  const findProfile = (id) => profiles.get(id);
-
-  async function describe_profile({ profile_id }) {
-    const p = findProfile(profile_id);
-    if (!p) return text(`no profile <${profile_id}>. Available: ${profileList().map(x => x.title).join(', ')}.`);
-    const inlined = await codeListValues(p, scopedQuery);
-    return text(describeProfile(p, inlined));
+function tool(name, description, params) {
+  const properties = {};
+  for (const [key, text] of Object.entries(params)) {
+    properties[key] = { type: 'string', description: text };
   }
-
-  async function validate_spec({ spec }) {
-    let parsed;
-    try { parsed = parseSpec(spec); }
-    catch (e) { return text(`the spec did not parse: ${e.message}`); }
-    const p = findProfile(parsed.profileUri);
-    if (!p) return text(`no profile <${parsed.profileUri}>. Available: ${profileList().map(x => x.title).join(', ')}.`);
-    const errors = checkSpec(parsed, p, MAX_PATH_DEPTH, profiles);
-    if (errors.length) return text(errors[0]);
-    // The spec that checks out becomes the attached proposal.
-    session.onSpecValidated?.(spec);
-    return text(['ok', ...whereNotes(parsed, p)].join('\n'));
-  }
-
-  async function list_profiles() {
-    return text(profileList().map(x => `${x.title}  <${x.id}>`).join('\n'));
-  }
-
-  async function lookup_values({ profile_id, field, term }) {
-    const p = findProfile(profile_id);
-    if (!p) return text(`no profile <${profile_id}>. Available: ${profileList().map(x => x.title).join(', ')}.`);
-    if (!term) return text('no term to search for.');
-    try {
-      const out = await lookupValues(p, term, field, scopedQuery);
-      if (out.error) return text(out.error);
-      if (!out.matches.length) return text(`no value matches "${term}" in ${field}.`);
-      const lines = out.matches.map(m => `${m.label}  <${m.uri}>`);
-      if (out.total === '25+') lines.push('(25+ matches, narrow the term)');
-      if (out.exact) lines.push(`exact: <${out.exact}>`);
-      return text(lines.join('\n'));
-    } catch (e) {
-      return text(`the lookup failed: ${String(e.message || e).split('\n')[0]}`);
-    }
-  }
-
-  // A spec bijlage next to a message. The model opens it with read_spec:
-  // only files this service made are readable, hte spec files under share.
-  async function read_spec({ file_uri }) {
-    const fileName = String(file_uri || '').split('/').pop();
-    if (!fileName || !/^specificatie-[0-9a-f]{8}-[0-9a-f-]{27}\.ttl$/.test(fileName)) {
-      return text('no such spec file.');
-    }
-    const shareDir = process.env.SHARE_DIR || '/share';
-    try {
-      return text(readFileSync(`${shareDir}/${fileName}`, 'utf8'));
-    } catch (e) {
-      return text(`the spec failed to load: ${String(e.message || e).split('\n')[0]}`);
-    }
-  }
-
-  const handlers = new Map(
-    [
-      ['list_profiles', list_profiles],
-      ['describe_profile', describe_profile],
-      ['validate_spec', validate_spec],
-      ['read_spec', read_spec],
-      ['lookup_values', lookup_values],
-    ],
-  );
-
-  return { handlers };
+  return {
+    type: 'function',
+    function: {
+      name,
+      description,
+      parameters: { type: 'object', properties, required: Object.keys(params) },
+    },
+  };
 }
 
-function text(s) { return { content: [{ type: 'text', text: s }] }; }
+export async function runTool(name, args, profiles) {
+  switch (name) {
+    case 'list_profiles': return listProfiles(profiles);
+    case 'describe_profile': return describe(args, profiles);
+    case 'validate_spec': return validateSpec(args, profiles);
+    case 'read_spec': return readSpec(args);
+    case 'lookup_values': return lookup(args, profiles);
+    default: return `unknown tool "${name}"`;
+  }
+}
+
+function listProfiles(profiles) {
+  return [...profiles.values()].map(p => `${p.title}  <${p.uri}>`).join('\n');
+}
+
+async function describe({ profile_id }, profiles) {
+  return profileError(profiles, profile_id) || describeProfile(profiles.get(profile_id));
+}
+
+function validateSpec({ spec }, profiles) {
+  let parsed;
+  try {
+    parsed = parseSpec(spec);
+  } catch (e) {
+    return `the spec did not parse: ${e.message}`;
+  }
+  const error = checkSpec(parsed, profiles);
+  if (error) return error;
+  return ['ok', ...whereNotes(parsed, profiles.get(parsed.profileUri))].join('\n');
+}
+
+// Only spec files this service made are readable.
+function readSpec({ file_name }) {
+  return readSpecFile(file_name) || 'no such spec file.';
+}
+
+async function lookup({ profile_id, field, term }, profiles) {
+  const error = profileError(profiles, profile_id);
+  if (error) return error;
+  if (!term) return 'no term to search for.';
+  return lookupValues(profiles.get(profile_id), field, term);
+}

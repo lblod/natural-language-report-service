@@ -1,35 +1,46 @@
+import { update, uuid, sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime } from 'mu';
 import { seed } from './seed.js';
 import { fetchColumns } from './columns.js';
 import { assemble } from './assemble.js';
-import { rowsToCsv, writeCsv, writeSpec } from './csv.js';
-import { registerFile, registerReport } from './report.js';
 import { startShape } from './profile.js';
 
-// Ties the steps together: seed → columns → assemble → CSV → register.
-// Returns { reportUri, fileUri, rowCount }.
+const REPORT_CLASS = process.env.REPORT_CLASS || 'http://lblod.data.gift/vocabularies/reporting/Report';
+const CSV_SEPARATOR = process.env.CSV_SEPARATOR || ';';
 
-export async function run(query, update, parsed, profile, title, extra = {}) {
-  const shape = startShape(profile, parsed);
-  const subjects = await seed(query, parsed, shape);
-
-  const values = new Map();
-  await fetchColumns(query, subjects, parsed, values);
-
-  const rows = assemble(subjects, values, parsed);
-  const fileName = extra.fileName || `${slug(title)}.csv`;
-  const csv = rowsToCsv(rows);
-  const filePath = writeCsv(fileName, csv);
-  const specFile = extra.spec && writeSpec(fileName, extra.spec);
-
-  const fileUri = await registerFile(update, fileName, filePath, { type: extra.fileType });
-  const reportUri = await registerReport(update, title, fileUri,
-    specFile ? { ...extra, specFile } : extra);
-
-  return { reportUri, fileUri, rowCount: rows.length - 1, filePath };
+// run(spec, profile) → the CSV text. seed → columns → assemble → CSV.
+export async function run(spec, profile) {
+  const subjects = await seed(spec, startShape(profile, spec));
+  const values = await fetchColumns(subjects, spec);
+  const rows = assemble(subjects, values, spec);
+  return rows.map(row => row.map(csvCell).join(CSV_SEPARATOR)).join('\n');
 }
 
-// The file name must be known before the run starts, so the chat can show a
-// pending card named after the report.
+// A cell is quoted only when it holds the separator, a quote or a newline;
+// a quote inside a cell is doubled, per RFC 4180.
+function csvCell(cell) {
+  const s = String(cell ?? '');
+  return s.includes(CSV_SEPARATOR) || s.includes('"') || /[\n\r]/.test(s)
+    ? `"${s.replace(/"/g, '""')}"`
+    : s;
+}
+
+// One report pointing at the logical file URI of its CSV.
+export async function registerReport(title, fileUri) {
+  const id = uuid();
+  const reportUri = `http://data.lblod.info/id/reports/${id}`;
+
+  await update(`
+    INSERT DATA {
+      ${sparqlEscapeUri(reportUri)} a ${sparqlEscapeUri(REPORT_CLASS)} ;
+        ${sparqlEscapeUri('http://mu.semte.ch/vocabularies/core/uuid')} ${sparqlEscapeString(id)} ;
+        ${sparqlEscapeUri('http://purl.org/dc/terms/title')} ${sparqlEscapeString(title)} ;
+        ${sparqlEscapeUri('http://purl.org/dc/terms/created')} ${sparqlEscapeDateTime(new Date())} ;
+        ${sparqlEscapeUri('http://www.w3.org/ns/prov#generated')} ${sparqlEscapeUri(fileUri)} .
+    }`);
+
+  return reportUri;
+}
+
 export function slug(title) {
   return (title || 'report').toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')

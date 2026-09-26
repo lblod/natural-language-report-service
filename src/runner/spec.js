@@ -23,22 +23,21 @@ export function parseSpec(turtle) {
   const profileUri = one(specNode, REP + 'profile')?.value || null;
   const title = one(specNode, 'http://purl.org/dc/terms/title')?.value || null;
 
-  const filters = store.getQuads(specNode, SH + 'property', null).map(q =>
-    parseFilter(store, q.object, { withLabel: true }));
+  const filters = store.getQuads(specNode, SH + 'property', null).map(q => parseFilter(store, q.object));
 
   const columnsQuad = one(specNode, REP + 'columns');
-  const columns = columnsQuad ? parseColumnList(store, columnsQuad) : [];
+  const columns = columnsQuad ? readRdfList(store, columnsQuad).map(col => parseColumn(store, col)) : [];
 
   return { uri: specNode.value, title, profileUri, targetClass, entity, filters, columns };
 }
 
-function parseFilter(store, p, { withLabel = false } = {}) {
+function parseFilter(store, p) {
   let path = [];
   const pathQuad = store.getQuads(p, SH + 'path', null)[0]?.object;
   if (pathQuad) path = parsePath(store, pathQuad);
   return {
     path,
-    constraints: readConstraints(store, p, { withLabel }),
+    constraints: readConstraints(store, p, { withLabel: true }),
     where: readWhere(store, p),
   };
 }
@@ -47,8 +46,7 @@ function parseFilter(store, p, { withLabel = false } = {}) {
 // is written like a filter, from the row; check.js refuses one nested in
 // another.
 function readWhere(store, node) {
-  return store.getQuads(node, REP + 'where', null).map(q =>
-    parseFilter(store, q.object, { withLabel: true }));
+  return store.getQuads(node, REP + 'where', null).map(q => parseFilter(store, q.object));
 }
 
 // The number of steps two paths have in common from the row. A rep:where
@@ -58,18 +56,6 @@ export function sharedSteps(a, b) {
   while (k < a.length && k < b.length
     && a[k].predicate === b[k].predicate && !!a[k].inverse === !!b[k].inverse) k++;
   return k;
-}
-
-function parseColumnList(store, listNode) {
-  const columns = [];
-  let cur = listNode;
-  while (cur && cur.value !== RDF + 'nil') {
-    const item = store.getQuads(cur, RDF + 'first', null)[0]?.object;
-    if (item) columns.push(parseColumn(store, item));
-    cur = store.getQuads(cur, RDF + 'rest', null)[0]?.object;
-    if (!cur) throw new Error('rep:columns list is broken (no rdf:rest terminator)');
-  }
-  return columns;
 }
 
 function parseColumn(store, col) {
@@ -107,21 +93,12 @@ function parsePath(store, pathQuad) {
     return [{ predicate: pathQuad.value, inverse: false }];
   }
   // RDF list of predicates
-  const hops = [];
-  let cur = pathQuad;
-  while (cur && cur.value !== RDF + 'nil') {
-    const item = store.getQuads(cur, RDF + 'first', null)[0]?.object;
-    if (!item) throw new Error('sh:path list is broken');
-    if (item.termType === 'BlankNode') {
-      const inv = store.getQuads(item, SH + 'inversePath', null)[0]?.object;
-      if (!inv) throw new Error('sh:path list items must be URIs or [ sh:inversePath <predicate> ]');
-      hops.push({ predicate: inv.value, inverse: true });
-    } else {
-      hops.push({ predicate: item.value, inverse: false });
-    }
-    cur = store.getQuads(cur, RDF + 'rest', null)[0]?.object;
-  }
-  return hops;
+  return readRdfList(store, pathQuad).map(item => {
+    if (item.termType !== 'BlankNode') return { predicate: item.value, inverse: false };
+    const inv = store.getQuads(item, SH + 'inversePath', null)[0]?.object;
+    if (!inv) throw new Error('sh:path list items must be URIs or [ sh:inversePath <predicate> ]');
+    return { predicate: inv.value, inverse: true };
+  });
 }
 
 function readConstraints(store, p, { withLabel = false } = {}) {
