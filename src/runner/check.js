@@ -298,6 +298,31 @@ function whereConditions(spec, profile, maxPathDepth) {
   return null;
 }
 
+// A date or number condition compares values. On a link (an entity or a
+// code) it compares a URI and never matches, so its path must end on a field
+// with a datatype.
+function rangeOnValue(spec, profile) {
+  const startShapeUri = startShapeOf(spec, profile);
+  for (const { what, cond } of conditions(spec)) {
+    const key = ['minInclusive', 'maxInclusive', 'minExclusive', 'maxExclusive']
+      .find(k => cond.constraints[k]);
+    if (!key || !cond.path.length) continue;
+    const last = cond.path[cond.path.length - 1];
+    const f = fieldsOf(profile, shapeAfter(profile, startShapeUri, cond.path))
+      .find(x => x.path === last.predicate && !!x.inverse === !!last.inverse);
+    if (!f || f.datatype) continue;   // pathsResolve reports a missing step
+    const target = f.node
+      ? `"${profile.shapes.find(s => s.uri === f.node)?.label || f.node}"`
+      : `the code "${f.name}"`;
+    const steps = fieldsOf(profile, f.node)
+      .filter(x => x.datatype === XSD_DATE || x.datatype === XSD_DATETIME || NUMERIC_DATATYPES.has(x.datatype))
+      .map(x => `${x.name} (${x.path})`);
+    const add = steps.length ? `Add a step: ${steps.join(' or ')}.` : 'End the path on a date or number field.';
+    return `${what} ends on ${target}, not on a value, so sh:${key} never matches. ${add}`;
+  }
+  return null;
+}
+
 // Where each rep:where applies, in the profile's words, so the proposal can
 // say it. Profile only, no database.
 export function whereNotes(spec, profile) {
@@ -341,6 +366,7 @@ const CHECKS = [
   ['two rep:row columns', oneRowColumn],
   ['path does not resolve', pathsResolve],
   ['rep:where does not fit', whereConditions],
+  ['date or number condition on a link', rangeOnValue],
   ['sh:min/sh:max on a non-number', collectMinMaxTyped],
 ];
 
