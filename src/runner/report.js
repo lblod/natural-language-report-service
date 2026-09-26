@@ -7,8 +7,8 @@ const REPORT_CLASS = process.env.REPORT_CLASS || 'http://lblod.data.gift/vocabul
 
 // Register the CSV: a logical file (http://data.lblod.info/files/<uuid>) plus
 // a physical share:// file pointing back with nie:dataSource. The logical
-// URI is what you link to.
-export async function registerFile(sessionUpdateFn, fileName, filePath) {
+// URI is what you link to. When given, the file gets dct:type.
+export async function registerFile(sessionUpdateFn, fileName, filePath, { type } = {}) {
   const size = statSync(filePath).size;
   const uuid = randomUUID();
   const uuid2 = randomUUID();
@@ -23,14 +23,16 @@ export async function registerFile(sessionUpdateFn, fileName, filePath) {
         ${sparqlEscapeUri('http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#fileName')} ${sparqlEscapeString(fileName)} ;
         ${sparqlEscapeUri('http://purl.org/dc/terms/format')} ${sparqlEscapeString('text/csv')} ;
         ${sparqlEscapeUri('http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#fileSize')} ${sparqlEscapeInt(size)} ;
-        ${sparqlEscapeUri('http://purl.org/dc/terms/created')} ${sparqlEscapeDateTime(now)} .
+        ${sparqlEscapeUri('http://purl.org/dc/terms/created')} ${sparqlEscapeDateTime(now)}${type ? ` ;
+        ${sparqlEscapeUri('http://purl.org/dc/terms/type')} ${sparqlEscapeUri(type)}` : ''} .
       ${sparqlEscapeUri(physicalUri)} a ${sparqlEscapeUri('http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#FileDataObject')} ;
         ${sparqlEscapeUri('http://mu.semte.ch/vocabularies/core/uuid')} ${sparqlEscapeString(uuid2)} ;
         ${sparqlEscapeUri('http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#fileName')} ${sparqlEscapeString(fileName)} ;
         ${sparqlEscapeUri('http://purl.org/dc/terms/format')} ${sparqlEscapeString('text/csv')} ;
         ${sparqlEscapeUri('http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#fileSize')} ${sparqlEscapeInt(size)} ;
         ${sparqlEscapeUri('http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#fileCreated')} ${sparqlEscapeDateTime(now)} ;
-        ${sparqlEscapeUri('http://www.semanticdesktop.org/ontologies/2007/01/19/nie#dataSource')} ${sparqlEscapeUri(logicalUri)} .
+        ${sparqlEscapeUri('http://www.semanticdesktop.org/ontologies/2007/01/19/nie#dataSource')} ${sparqlEscapeUri(logicalUri)}${type ? ` ;
+        ${sparqlEscapeUri('http://purl.org/dc/terms/type')} ${sparqlEscapeUri(type)}` : ''} .
     }`);
 
   return logicalUri;

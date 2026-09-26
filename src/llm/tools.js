@@ -1,11 +1,11 @@
 // The tools the LLM calls. Two modes:
-// - refine: list_profiles, describe_profile, validate_spec, lookup_values.
-//   lookup_values searches a code list under the service scope (public
-//   graph) and returns candidate values, so the LLM can suggest concrete
-//   filter values. No report is created, no spec is evaluated.
-// - execute: list_profiles, describe_profile, validate_spec, run_report.
-//   run_report runs as the caller and returns only counts and URIs; no cell
-//   value ever reaches the model.
+// - refine: list_profiles, describe_profile, validate_spec, lookup_values,
+//   read_spec. lookup_values searches a code list under the service scope
+//   (public graph) and returns candidate values, so the LLM can suggest
+//   concrete filter values. No report is created, no spec is evaluated.
+// - execute: list_profiles, describe_profile, validate_spec, read_spec,
+//   run_report. run_report runs as the caller and returns only counts and
+//   URIs; no cell value ever reaches the model.
 //
 // The shape every tool returns is { content: [{ type: 'text', text }] },
 // which the loop passes straight back to the model.
@@ -16,6 +16,8 @@ import { describeProfile, codeListValues } from './describe.js';
 import { lookupValues } from './lookup.js';
 import { run, slug } from '../runner/run.js';
 import { scopedQuery } from '../db.js';
+import { readFileSync } from 'fs';
+import { ATTACHMENT_TYPES } from '../chat/vocab.js';
 
 const MAX_PATH_DEPTH = Number(process.env.MAX_PATH_DEPTH || 8);
 const RUN_TIMEOUT = Number(process.env.RUN_TIMEOUT || 60) * 1000;
@@ -40,6 +42,8 @@ export function buildTools(profiles, session, mode = 'refine') {
     const p = findProfile(parsed.profileUri);
     if (!p) return text(`no profile <${parsed.profileUri}>. Available: ${profileList().map(x => x.title).join(', ')}.`);
     const errors = checkSpec(parsed, p, MAX_PATH_DEPTH, profiles);
+    // In refinement the spec that checks out becomes the attached proposal.
+    if (!errors.length) session.onSpecValidated?.(spec);
     return text(errors.length ? errors[0] : 'ok');
   }
 
@@ -72,12 +76,14 @@ export function buildTools(profiles, session, mode = 'refine') {
     if (!p) return text(`no profile <${parsed.profileUri}>.`);
     const errors = checkSpec(parsed, p, MAX_PATH_DEPTH, profiles);
     if (errors.length) return text(`the spec is not valid: ${errors[0]}`);
+    // The executed spec is the one to keep: attach it with the turn's answer.
+    session.onSpecValidated?.(spec);
     try {
       // The spec's dct:title names the report.
       const name = parsed.title || 'report';
       await session.onReportStart?.({ title: name, fileName: `${slug(name)}.csv` });
       const waiter = newRunWaiter(RUN_TIMEOUT);
-      const running = run(session.query, session.update, parsed, p, name, { spec }, waiter.tick);
+      const running = run(session.query, session.update, parsed, p, name, { spec, fileType: ATTACHMENT_TYPES.result }, waiter.tick);
       // The end callback also fires after the wait gave up: the run is not
       // cancelled, the file arrives when it arrives. The .catch keeps a late
       // failure from crashing the process.
@@ -91,20 +97,29 @@ export function buildTools(profiles, session, mode = 'refine') {
     }
   }
 
+  // A spec bijlage next to a message. The model opens it with read_spec:
+  // only files this service made are readable, hte spec files under share.
+  async function read_spec({ file_uri }) {
+    const fileName = String(file_uri || '').split('/').pop();
+    if (!fileName || !/^specificatie-[0-9a-f]{8}-[0-9a-f-]{27}\.ttl$/.test(fileName)) {
+      return text('no such spec file.');
+    }
+    const shareDir = process.env.SHARE_DIR || '/share';
+    try {
+      return text(readFileSync(`${shareDir}/${fileName}`, 'utf8'));
+    } catch (e) {
+      return text(`the spec failed to load: ${String(e.message || e).split('\n')[0]}`);
+    }
+  }
+
   const handlers = new Map(
-    mode === 'execute'
-      ? [
-        ['list_profiles', list_profiles],
-        ['describe_profile', describe_profile],
-        ['validate_spec', validate_spec],
-        ['run_report', run_report],
-      ]
-      : [
-        ['list_profiles', list_profiles],
-        ['describe_profile', describe_profile],
-        ['validate_spec', validate_spec],
-        ['lookup_values', lookup_values],
-      ],
+    [
+      ['list_profiles', list_profiles],
+      ['describe_profile', describe_profile],
+      ['validate_spec', validate_spec],
+      ['read_spec', read_spec],
+      ...(mode === 'execute' ? [['run_report', run_report]] : [['lookup_values', lookup_values]]),
+    ],
   );
 
   return { handlers };

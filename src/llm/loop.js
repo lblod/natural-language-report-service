@@ -47,13 +47,19 @@ for a filter, so your proposal names real values instead of guesses. That is
 the only database read you have, and it only suggests values: it never tells
 you whether a spec is good or how much it matches. The database you read may
 differ from the one the report runs on, so never treat a lookup as a check.
-Iterate with the user on the spec itself: paths, filters, columns. Never call
-run_report; there is no such tool here. When the spec is ready, present it in
-Dutch and ask the user to confirm execution. Then stop.
+Iterate with the user on the spec itself: paths, filters, columns. When the
+user wants an earlier spec changed, open it with read_spec and change what
+they asked for. Never call
+run_report; there is no such tool here. When the spec is ready, ask the user
+to confirm execution. Then stop.
 
-Your final answer to the user MUST contain the full agreed spec as one Turtle
-block, so the next turn can reuse it verbatim. Put the Dutch explanation first,
-then the Turtle block, then the question asking to confirm.
+The spec itself does not go in your text. validate_spec stores a spec that
+checks out as an attachment ("bijlage", a spec file) on your answer. So in
+your answer: explain in Dutch in full what the report will list and which
+filters it applies, tell the user the actual spec is in the bijlage and to
+look there, and ask the user to confirm execution. Do not print the Turtle
+yourself; the bijlage shows the validated version, so never rewrite it in
+the text either.
 
 Always prefix the spec with @prefix lines. Use the prefixes the profile
 declares. Write the spec as one Turtle block. Then call validate_spec. Fix
@@ -82,9 +88,11 @@ Rules:
 - One question makes one report. Write the agreed spec, validate it, run it,
   then stop. Do not write a second report.
 
-The agreed spec may already be in an earlier assistant message (a Turtle
-block). Reuse it verbatim when it fits the user's confirmed intent; only
-adjust it when the user asked for a change.
+The agreed spec may already be attached ("bijlage") to an earlier assistant
+message in the conversation, a ttl file typed as a rapportspecificatie. Use
+read_spec on its file uri to bring it back, then reuse it verbatim when it
+fits the user's confirmed intent; only adjust it when the user asked for a
+change.
 
 Always prefix the spec with @prefix lines. Use the prefixes the profile
 declares. Write the spec as one Turtle block. Then call validate_spec. Fix
@@ -108,9 +116,24 @@ export async function ask(questionOrMessages, profiles, session) {
   trace.push({ name: 'classify', args: { execute }, result: execute ? 'execute' : 'refine' });
 
   if (execute) {
-    return runLoop(turns, profiles, session, 'execute', trace);
+    return runLoop(withAttachmentSpecs(turns), profiles, session, 'execute', trace);
   }
-  return runLoop(turns, profiles, session, 'refine', trace);
+  return runLoop(withAttachmentSpecs(turns), profiles, session, 'refine', trace);
+}
+
+// The history carries the spec as a bijlage. Paste one hint line per spec
+// under the message text, so the model knows a spec is there and opens it
+// with read_spec; the chat itself still keeps the Turtle out of the text.
+function withAttachmentSpecs(turns) {
+  return turns.map(t => {
+    const specs = (t.attachments || []).filter(a => a.mediaType === 'text/turtle' && a.uri);
+    if (!specs.length) return t;
+    return {
+      ...t,
+      content: `${t.content}\n\n${specs.map(a =>
+        `Bijlage "${a.name}", a spec file (read it with read_spec): ${a.uri}`).join('\n\n')}`,
+    };
+  });
 }
 
 // runLoop drives the agent loop for one mode. The mode picks the system

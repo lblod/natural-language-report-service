@@ -4,7 +4,7 @@ import express from 'express';
 import { query as muQuery, update as muUpdate } from 'mu';
 import {
   readConversation, readHistory, findAssistant,
-  writeMessage, setDocumentUrl, dropDocument,
+  writeMessage,
 } from './store.js';
 
 const TEXT = {
@@ -58,13 +58,18 @@ export function mountChat(app, { path = '/assistant', answer }) {
       say: (text, attachments = []) => writeMessage({
         conversationUri: conversation.uri, content: text, maker: assistant, attachments,
       }),
-      setUrl: (documentUri, url) => setDocumentUrl(documentUri, url, conversation.uri),
-      drop: (documentUri) => dropDocument(documentUri),
     };
 
     try {
-      const text = await answer(turn);
-      if (typeof text === 'string' && text.trim()) await turn.say(text.trim());
+      // answer may return a string, or { text, attachments } for answers the
+      // assistant writes with an attachment, such as the report spec.
+      const result = await answer(turn);
+      const text = typeof result === 'string' ? result : result?.text;
+      const attachments
+        = typeof result === 'string' ? [] : (result?.attachments ?? []);
+      if (typeof text === 'string' && text.trim()) {
+        await turn.say(text.trim(), attachments);
+      }
     } catch (e) {
       console.error('[chat] turn failed:', e);
       try {

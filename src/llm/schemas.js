@@ -1,7 +1,7 @@
 // The JSON schemas of the tools. The descriptions are what the LLM reads to
-// decide which tool to call. Two modes share three tools (list_profiles,
-// describe_profile, validate_spec); refine adds lookup_values, execute adds
-// run_report.
+// decide which tool to call. Two modes share four tools (list_profiles,
+// describe_profile, validate_spec, read_spec); refine adds lookup_values,
+// execute adds run_report.
 
 const COMMON = [
   {
@@ -53,7 +53,17 @@ const RUN_REPORT = {
   },
 };
 
+const READ_SPEC = {
+  name: 'read_spec',
+  description: 'Return the Turtle of a spec bijlage, a ttl file attached to an earlier message in this conversation. Use it to reuse the agreed spec, or to read back an earlier proposal before you change it. Read-only.',
+  inputSchema: {
+    type: 'object',
+    properties: { file_uri: { type: 'string', description: 'The file URI of the spec bijlage, e.g. http://data.lblod.info/files/<uuid>' } },
+    required: ['file_uri'],
+  },
+};
+
 export function toolSchemas(mode = 'refine') {
-  if (mode === 'execute') return [...COMMON, RUN_REPORT];
-  return [...COMMON, LOOKUP_VALUES];
+  if (mode === 'execute') return [...COMMON, READ_SPEC, RUN_REPORT];
+  return [...COMMON, READ_SPEC, LOOKUP_VALUES];
 }

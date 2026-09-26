@@ -25,7 +25,7 @@ export async function run(query, update, parsed, profile, title, extra = {}, onP
   const filePath = writeCsv(fileName, csv);
   const specFile = extra.spec && writeSpec(fileName, extra.spec);
 
-  const fileUri = await registerFile(update, fileName, filePath);
+  const fileUri = await registerFile(update, fileName, filePath, { type: extra.fileType });
   const reportUri = await registerReport(update, title, fileUri,
     specFile ? { ...extra, specFile } : extra);
 
