@@ -1,17 +1,15 @@
 import { query, sparqlEscapeUri } from 'mu';
 import { hopsPattern, wherePatterns } from './seed.js';
 
-// Fetch column values for known subjects. Columns are grouped by their
-// shared non-leaf hops; two columns share a query only when every hop
-// before the leaf is identical, and the leaf is read the same way.
-// rep:self columns (empty path) are filled by assemble.js. Every query
-// returns the nodes on the path too, so assemble.js can pair columns by the
-// nodes they share.
+// Fetch the column values of the subjects. Columns with the same path and
+// the same rep:where share one query. rep:self columns (empty path) need no
+// query: assemble.js fills them. Every query also returns the nodes on the
+// path, so assemble.js can pair columns by the nodes they share.
 
 const SUBJECT_CHUNK_SIZE = Math.max(1, Number(process.env.SUBJECT_CHUNK_SIZE) || 100);
 
-// fetchColumns(subjects, spec) → subject → column index → [chain], a chain
-// being the terms on the path, one per step, the value last.
+// Returns subject → column index → [chain], a chain being the terms on the
+// path, one per step, the value last.
 export async function fetchColumns(subjects, spec) {
   const values = new Map();
   const groups = groupColumns(spec.columns);
@@ -25,26 +23,22 @@ export async function fetchColumns(subjects, spec) {
   return values;
 }
 
-// Group columns by their shared prefix (every hop before the leaf) and the
-// direction of the leaf. A column with an empty path (rep:self) joins no group.
-// A column with rep:where only shares a group with the same conditions.
-export function groupColumns(columns) {
+function groupColumns(columns) {
   const groups = new Map();
   columns.forEach((col, index) => {
     if (!col.path.length) return;   // rep:self
-    const leaf = col.path[col.path.length - 1];
     const where = col.where || [];
     const key = col.path.map(h => `${h.inverse ? '^' : ''}${h.predicate}`).join(' > ')
       + (where.length ? ` | ${JSON.stringify(where)}` : '');
     if (!groups.has(key)) {
       groups.set(key, { hops: col.path, where, columns: [] });
     }
-    groups.get(key).columns.push({ index, leaf: leaf.predicate });
+    groups.get(key).columns.push(index);
   });
   return [...groups.values()];
 }
 
-export function groupQuery(group, chunk) {
+function groupQuery(group, chunk) {
   const subjects = chunk.map(sparqlEscapeUri).join(' ');
   // every hop except the last gets its own variable; the leaf is ?v
   const lines = [hopsPattern(group.hops, 'x', '?s', '?v')];
@@ -61,9 +55,9 @@ function collect(result, group, values) {
     const chain = [...group.hops.slice(1).map((hop, i) => b[`x_${i + 1}`]), b.v];
     let perColumn = values.get(b.s.value);
     if (!perColumn) { perColumn = new Map(); values.set(b.s.value, perColumn); }
-    for (const col of group.columns) {
-      let list = perColumn.get(col.index);
-      if (!list) { list = []; perColumn.set(col.index, list); }
+    for (const index of group.columns) {
+      let list = perColumn.get(index);
+      if (!list) { list = []; perColumn.set(index, list); }
       list.push(chain);
     }
   }

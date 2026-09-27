@@ -1,14 +1,10 @@
-// The agent loop: POST /v1/chat/completions with tool calls,
-// OpenAI-compatible (LLM_BASE_URL, LLM_MODEL, LLM_API_KEY). No provider
-// SDKs. Stops when the model answers without tool calls.
-//
-// Refinement only: the LLM proposes a spec, may look up candidate values in
-// code lists (under the service scope) and iterates with the user. It never
-// runs a report and never learns what a spec would match. The user must
-// confirm before anything executes; execution runs the agreed spec without
-// the LLM (../report-assistant.js).
+// The refine loop. The LLM proposes a spec, may look up code-list values and
+// iterates with the user. It never runs a report and never learns what a
+// spec would match: the user confirms, and execution runs the agreed spec
+// without the LLM. It talks to an OpenAI-compatible /chat/completions with
+// tool calls and no provider SDK, so any such endpoint works.
 
-import { TOOLS, runTool, listProfiles } from './tools.js';
+import { TOOLS, runTool } from './tools.js';
 import { describeProfile } from './describe.js';
 import { parseSpec } from '../runner/spec.js';
 import { SPEC_MEDIA_TYPE, readSpecFile } from '../chat.js';
@@ -22,11 +18,6 @@ const LLM_API_KEY = process.env.LLM_API_KEY;
 // LOG_LLM=1 dumps every request to and response from the provider, verbatim.
 const LOG_LLM = /^(true|1)$/i.test(process.env.LOG_LLM || '');
 
-// Refinement (Modus A). The LLM and the user iterate on a spec. The LLM may
-// look up candidate values in code lists (lookup_values, under the service
-// scope) to make concrete suggestions, but it may not run a report and never
-// learns how many subjects a spec would match. It ends with a proposal in
-// Dutch and asks the user to confirm.
 const REFINE_PROMPT = `You refine report specs with the user. You never write SPARQL and you never run a report.
 
 The profile lists what can be asked. Compose paths by chaining fields. The
@@ -93,8 +84,8 @@ what it says, up to three rounds. Then propose and stop.
 
 Reply to the user in Dutch. Earlier turns are context only. Answer the last one.`;
 
-// ask(turns, profiles) → { text, spec }. turns is the conversation so far,
-// [{ role, content, attachments }], newest last. spec is the last spec
+// One refine turn. turns is the conversation so far, [{ role, content,
+// attachments }], newest last. Returns the answer text and the last spec
 // validate_spec accepted in this turn, or null.
 export async function ask(turns, profiles) {
   const current = currentSpec(turns);
@@ -174,6 +165,10 @@ async function systemPrompt(current, profiles) {
   return parts.join('\n\n');
 }
 
+function listProfiles(profiles) {
+  return [...profiles.values()].map(p => `${p.title}  <${p.uri}>`).join('\n');
+}
+
 function profileOf(turtle) {
   try {
     return parseSpec(turtle).profileUri;
@@ -207,10 +202,11 @@ function leaveOutSpec(call) {
   return { ...call, function: { ...call.function, arguments: JSON.stringify({ spec: LEFT_OUT }) } };
 }
 
-// chat(messages, tools) → { message }. The one place that talks to the
-// provider. Without tools it is a plain completion (the mode check).
+// The one place that talks to the provider. Without tools it is a plain
+// completion (the mode check).
 export async function chat(messages, tools = null) {
-  // Send only the fields every provider accepts back.
+  // Send only the fields every provider accepts back. Attachments never go
+  // out.
   const wire = messages.map(m => {
     const out = { role: m.role, content: m.content ?? null };
     if (m.tool_calls) {

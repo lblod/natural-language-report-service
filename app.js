@@ -24,13 +24,13 @@ app.post('/assistant/conversations/:id/turns', bodyParser.json(), async function
   const content = String(req.body?.content ?? '').trim();
   if (!content) return res.status(400).json({ error: 'content is required' });
 
-  let conversation, history, question;
+  let conversation, history, questionId;
   try {
     // the access check: the caller's session decides what is readable
     conversation = await readConversation(req.params.id);
     if (!conversation) return res.status(404).json({ error: 'no such conversation' });
     history = await readHistory(conversation.uri, CHAT_ASSISTANT_URI);
-    question = await writeMessage({
+    questionId = await writeMessage({
       conversationUri: conversation.uri,
       content,
       maker: conversation.creator,
@@ -41,7 +41,7 @@ app.post('/assistant/conversations/:id/turns', bodyParser.json(), async function
     return res.status(500).json({ error: e.message });
   }
 
-  res.status(202).json({ id: question.id });
+  res.status(202).json({ id: questionId });
 
   try {
     const turns = [...history, { role: 'user', content }];

@@ -1,8 +1,7 @@
-// The mode classifier. One LLM call per turn: a guestimate of whether the
-// user wants to keep refining the query or has given a clear command to
-// execute it now. Returns true (execute) / false (refine). Deterministic
-// code branches on the answer; refine is the safe default when the call
-// fails or the answer does not parse.
+// Run or refine. One LLM call per turn reads whether the user gave a clear
+// command to run the report now. Plain code branches on the answer. Refine
+// is the default when the call fails or the answer is unclear: running a
+// report on a guess is worse than asking once more.
 
 import { chat } from './loop.js';
 
@@ -25,13 +24,13 @@ Rules:
 Reply with exactly one token: true or false. No other words, no punctuation,
 no markdown.`;
 
-// wantsExecution(turns) → true when the user's last message says "run it
-// now". turns: [{ role, content }], newest last; the last few are enough.
+// True when the user's last message says "run it now". turns: [{ role,
+// content }], newest last; the last few are enough.
 export async function wantsExecution(turns) {
   let message;
   try {
     ({ message } = await chat([{ role: 'system', content: MODE_PROMPT }, ...turns.slice(-6)]));
-  } catch (e) {
+  } catch {
     // The call failed (no LLM, provider down). Refine: safer than running a
     // report on a guess, and the refine loop will surface the real error.
     return false;

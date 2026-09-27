@@ -1,19 +1,19 @@
-// What the assistant answers a chat turn with: { text, attachments }. When
-// the answer is written, every bijlage already exists.
+// The two answers to a chat turn, as { text, attachments }. Every bijlage
+// exists before the answer is written.
 //
-// Refine: the LLM proposes a spec; the last spec that checked out goes on
-// the answer as a bijlage. The prompt never carries the Turtle.
+// Refine: the LLM proposes a spec. The last spec that checked out goes on the
+// answer as a bijlage, not in the text.
 //
-// Execute: no LLM runs. The last spec bijlage in the conversation is the
-// agreed spec; it is read from the share and fed straight to the runner.
-// The answer is fixed text. When the run cannot happen or fails, the answer
-// is a fixed failure message: nothing is retried and no spec is rewritten.
+// Execute: no LLM runs, so no LLM ever sees report data. The last spec
+// bijlage in the conversation is the agreed spec; it goes straight to the
+// runner. The answer is fixed text, also when the run fails: nothing is
+// retried and no spec is rewritten.
 import { uuid } from 'mu';
 import { ask } from './llm/loop.js';
 import { parseSpec } from './runner/spec.js';
 import { checkSpec } from './runner/check.js';
-import { run, registerReport, slug } from './runner/run.js';
-import { storeSpecFile, readSpecFile, writeShareFile, registerFile,
+import { run } from './runner/run.js';
+import { storeSpecFile, readSpecFile, writeShareFile, registerFile, registerReport,
          SPEC_MEDIA_TYPE, SPEC_TYPE, RESULT_TYPE } from './chat.js';
 
 const TEXT = {
@@ -65,7 +65,13 @@ export async function executeSpec(history, conversationTitle, profiles) {
 }
 
 function lastSpecAttachment(history) {
-  const specs = history.flatMap(message => message.attachments)
-    .filter(a => a.mediaType === SPEC_MEDIA_TYPE && a.name?.startsWith('specificatie-'));
-  return specs.at(-1) || null;
+  return history.flatMap(message => message.attachments)
+    .filter(a => a.mediaType === SPEC_MEDIA_TYPE).at(-1) || null;
+}
+
+function slug(title) {
+  return (title || 'report').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'report';
 }

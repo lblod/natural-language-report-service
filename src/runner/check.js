@@ -69,13 +69,11 @@ function conditions(spec) {
   return out;
 }
 
-// Columns exist
 function columnsPresent(spec) {
   if (!spec.columns.length) return 'no columns. Add at least one rep:columns entry.';
   return null;
 }
 
-// Every column has a label
 function columnLabel(spec) {
   for (const col of spec.columns) {
     if (!col.label) return 'a column has no rdfs:label.';
@@ -83,7 +81,6 @@ function columnLabel(spec) {
   return null;
 }
 
-// Labels are unique
 function columnLabelsUnique(spec) {
   const seen = new Set();
   for (const col of spec.columns) {
@@ -129,7 +126,6 @@ function collectMinMaxTyped(spec, profile) {
   return null;
 }
 
-// At most one rep:row column
 function oneRowColumn(spec) {
   const rowCols = spec.columns.filter(c => c.collect === REP + 'row');
   if (rowCols.length > 1) {
@@ -181,8 +177,9 @@ function filterConstraint(spec) {
   return null;
 }
 
-// sh:maxCount above 0 needs counting
-function maxCountZero(spec) {
+// The runner cannot count: it knows sh:maxCount 0 (none) and sh:minCount 1
+// or 2 (two distinct values), nothing more.
+function countLimits(spec) {
   for (const { cond } of conditions(spec)) {
     const c = cond.constraints;
     if (c.maxCount > 0) {
@@ -195,7 +192,6 @@ function maxCountZero(spec) {
   return null;
 }
 
-// rep:anyOf size limits
 function anyOfLimits(spec) {
   for (const { cond } of conditions(spec)) {
     const c = cond.constraints;
@@ -228,7 +224,6 @@ function inHomogeneous(spec) {
   return null;
 }
 
-// Typed literals must parse
 function literalsParse(spec) {
   const constraintTerms = [];
   for (const { cond } of conditions(spec)) {
@@ -343,7 +338,7 @@ const CHECKS = [
   columnPure,
   filterLabel,
   filterConstraint,
-  maxCountZero,
+  countLimits,
   anyOfLimits,
   inHomogeneous,
   literalsParse,
@@ -354,7 +349,7 @@ const CHECKS = [
   collectMinMaxTyped,
 ];
 
-// checkSpec(spec, profiles) → the first error, or null.
+// The first error, or null when the spec is fine.
 export function checkSpec(spec, profiles) {
   const error = profileError(profiles, spec.profileUri);
   if (error) return error;

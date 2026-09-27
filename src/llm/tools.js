@@ -54,11 +54,6 @@ export async function runTool(name, args, profiles) {
   }
 }
 
-// The profile list, in the system prompt: one line per profile.
-export function listProfiles(profiles) {
-  return [...profiles.values()].map(p => `${p.title}  <${p.uri}>`).join('\n');
-}
-
 async function describe({ profile_id }, profiles) {
   return profileError(profiles, profile_id) || describeProfile(profiles.get(profile_id));
 }

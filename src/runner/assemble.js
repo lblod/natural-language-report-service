@@ -20,8 +20,8 @@ export const NUMERIC_DATATYPES = new Set([
   'unsignedLong', 'unsignedInt', 'unsignedShort', 'unsignedByte',
 ].map(d => XSD + d));
 
-// assemble(subjects, values, spec) → rows, the header first. values:
-// subject → column index → chains, one term per step (see columns.js).
+// The rows of the report, the header first. values: subject → column
+// index → chains, one term per step (see columns.js).
 export function assemble(subjects, values, spec) {
   const tree = columnTree(spec.columns);
   const rows = [spec.columns.map(c => c.label)];

@@ -1,7 +1,8 @@
 import { query, sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime, sparqlEscapeDate } from 'mu';
 import { sharedSteps } from './spec.js';
 
-// Subject selection. One paged query per page; stops at ROW_LIMIT.
+// The subjects of a report, one query per page. More than ROW_LIMIT
+// subjects fails the run.
 const ROW_LIMIT = Number(process.env.ROW_LIMIT || 200000);
 const PAGE_SIZE = Number(process.env.SEED_PAGE_SIZE || 5000);
 
@@ -9,7 +10,7 @@ export async function seed(spec, shape) {
   const subjects = [];
   let offset = 0;
   for (;;) {
-    const result = await query(seedPageQuery(spec, PAGE_SIZE, offset, shape));
+    const result = await query(seedPageQuery(spec, shape, PAGE_SIZE, offset));
     const rows = result.results.bindings.map(b => b.s.value);
     subjects.push(...rows);
     if (subjects.length > ROW_LIMIT) {
@@ -21,11 +22,10 @@ export async function seed(spec, shape) {
   return subjects;
 }
 
-export function seedPageQuery(spec, limit, offset, shape = null) {
-  const parts = [];
-  const targetClass = spec.targetClass || shape?.targetClass;
-  parts.push(`?s a ${sparqlEscapeUri(targetClass)} .`);
-  (shape?.discriminators || []).forEach((d, di) => {
+// The validator made sure spec.targetClass is the class of shape.
+function seedPageQuery(spec, shape, limit, offset) {
+  const parts = [`?s a ${sparqlEscapeUri(spec.targetClass)} .`];
+  shape.discriminators.forEach((d, di) => {
     parts.push(discriminatorPattern(d, `disc${di}`));
   });
   spec.filters.forEach((filter, fi) => {
@@ -101,7 +101,7 @@ export function wherePatterns(where, hostHops, nodeVar, varPrefix) {
 // filter starts at ?s; a rep:where starts at a node of its host and, with no
 // hops left, tests that node itself. sh:maxCount 0 means "none such", so its
 // hops and any value test only live inside the NOT EXISTS.
-export function conditionPattern(c, varPrefix, hops, startVar) {
+function conditionPattern(c, varPrefix, hops, startVar) {
   if (c.maxCount === 0) {
     const { maxCount, ...test } = c;
     return `FILTER NOT EXISTS { ${conditionPattern(test, varPrefix + '_nex', hops, startVar)} }`;
