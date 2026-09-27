@@ -22,8 +22,8 @@ natural-language-report:
     - ./data/files:/share
     - ./config/report-profiles:/config/profiles
   environment:
-    LLM_BASE_URL: "https://ollama.com/v1"
-    LLM_MODEL: "gpt-oss:120b"
+    LLM_BASE_URL: "https://api.scaleway.ai/v1"
+    LLM_MODEL: "glm-5.2"
     LLM_API_KEY: "..."
 ```
 
@@ -37,8 +37,6 @@ end
 
 The chat itself is
 [frontend-report-assistant](https://github.com/lblod/frontend-report-assistant).
-It reads conversations and messages through mu-cl-resources. See
-`chat-domain.json` in `app-organization-portal`.
 
 ### Configuration
 
@@ -48,13 +46,18 @@ The service needs two things from the app:
   `/config/profiles`. A profile describes the data users may ask about: the
   kinds of things, their fields and the links between them. The service
   knows no vocabulary of its own. The tutorial below writes one.
-- **An LLM.** Any OpenAI-compatible endpoint, set with `LLM_BASE_URL`,
-  `LLM_MODEL` and `LLM_API_KEY`.
+- **An LLM.** Any OpenAI-compatible endpoint with tool calls, set with
+  `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`. The example uses GLM 5.2,
+  an open-weight model, on Scaleway: hosted in the EU, prompts not stored
+  and not used for training. A local Ollama works too.
 
-The app also seeds the agent that signs the answers (`CHAT_ASSISTANT_URI`)
-and the two bijlage types (see [Data model](#data-model)). In
-`app-organization-portal` the migrations `20260915120000-chat-assistant` and
-`20260926120000-add-chat-attachment-types-codelist` do this.
+The app also needs the chat resources in mu-cl-resources, the agent that
+signs the answers (`CHAT_ASSISTANT_URI`) and the two bijlage types (see
+[Data model](#data-model)). See
+[app-organization-portal#643](https://github.com/lblod/app-organization-portal/pull/643)
+for the resource config and the migrations to add.
+
+TODO: put this in a mu-cli script.
 
 ### Authorization
 
@@ -173,8 +176,8 @@ lists.
 
 | Name | Default | Meaning |
 |---|---|---|
-| `LLM_BASE_URL` | | OpenAI-compatible endpoint, for example `https://ollama.com/v1`. Without it every turn answers with a failure text. |
-| `LLM_MODEL` | | for example `gpt-oss:120b` |
+| `LLM_BASE_URL` | | OpenAI-compatible endpoint, for example `https://api.scaleway.ai/v1`. Without it every turn answers with a failure text. |
+| `LLM_MODEL` | | for example `glm-5.2` |
 | `LLM_API_KEY` | | bearer token, not needed for a local Ollama |
 | `PROFILE_DIR` | `/config/profiles` | folder with the profiles, one `.ttl` file each |
 | `SHARE_DIR` | `/share` | where CSVs and specs are written |
