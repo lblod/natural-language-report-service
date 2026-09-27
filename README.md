@@ -1,5 +1,7 @@
 # natural-language-report-service
 
+Work in progress, POC phase.
+
 A user asks for a report in Dutch. An LLM turns the question into a spec. A
 fixed program turns the spec into small SPARQL queries, joins the results and
 writes a CSV. The LLM writes no SPARQL and sees no report data.
