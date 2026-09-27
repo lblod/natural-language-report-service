@@ -147,7 +147,7 @@ We add a small profile and run one report on it.
 
 ## How it works
 
-A small LLM call first decides whether the user clearly said "run it". That
+First the LLM decides whether the user clearly said "run it". That
 picks one of two modes.
 
 - **Refine.** The LLM reads the profiles and writes or changes a spec. The
@@ -423,3 +423,24 @@ and the CSV half have no SHACL meaning.
 
 No counting, no sorting, no top-N, no comparing two subjects. One class per
 report. Filter suggestions read only what the service scope may read.
+
+## Discussion
+
+### Why a report spec and not SPARQL
+
+The LLM could write SPARQL directly. This we didn't do, becauuse:
+
+- Safety. Even when the service runs the query, the LLM decides what it
+  does. With SPARQL it can do odd things.
+- SPARQL can do too much to check it against the profile. A report needs
+  rows of one class, some filters and some columns. A spec only says that,
+  so all of it can be checked.
+- A report is often several queries: first the rows, then the columns in
+  batches, joined on URI. The service does this. One big query with an
+  `OPTIONAL` per column is slow and repeats rows.
+- A spec is RDF, so it can be stored in the database, linked to its report
+  and shared. Anyone who runs it gets the rows they may see. Today it is
+  stored as a file.
+  - The spec can be reused in totally different contexts.
+
+This doesn't come for free of course.
