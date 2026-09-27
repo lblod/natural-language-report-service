@@ -29,8 +29,8 @@ a fixed Dutch text with the CSV and the spec as bijlagen. No spec yet, a spec
 that no longer checks out, or a failed run each give a fixed Dutch failure
 message. Nothing is retried and no spec is rewritten.
 
-Only refinement has tools: `list_profiles`, `describe_profile`,
-`validate_spec`, `read_spec` and `lookup_values`.
+Only refinement has tools: `describe_profile`, `validate_spec`, `read_spec`
+and `lookup_values`.
 
 ## How it works
 
@@ -411,6 +411,7 @@ The scope URI is `SERVICE_SCOPE` (default
 
 ```
 POST /assistant/conversations/:id/turns      { content }           → 202 { id }
+DELETE /assistant/conversations/:id                                 → 204
 ```
 
 This is the chat. The route is in `app.js`: it records the question, answers
@@ -424,12 +425,39 @@ that way. Failure is a message, never a silent loader.
 The chat needs `LLM_BASE_URL`; without it every turn answers with a failure
 message. A full-org report run takes minutes.
 
+The delete is the trash bin in the chat's sidebar. It removes the
+conversation, its messages, their bijlagen (the triples and the files on
+the share) and the reports of those files. It runs as the caller: the auth
+layer keeps a user to their own conversations, and a conversation the caller
+cannot read is a 404.
+
 ### The internal tools
 
 The refinement loop drives one tool set (`src/llm/tools.js`). The tools are
 machinery, not an external surface. All LLM-facing text (system prompts,
 profile menu, tool descriptions, validator errors) is English; the answer the
 user sees is Dutch.
+
+### What the model sees
+
+The system prompt ends with the profile list and, when there is a current
+spec, the menu of its profile (`src/llm/loop.js`). A turn that stays on that
+profile needs no `describe_profile` call; the model calls it only for
+another profile.
+
+Each request to the model holds one spec in full: the newest.
+
+- The history is text only. A spec bijlage shows as its file name, and a
+  spec the model printed in its answer is cut out.
+- The current spec, the last spec bijlage in the conversation, comes in full
+  under the user's new message. When the user refines, the model changes it;
+  when the user asks for a report that lists another kind of thing per row,
+  it starts a new spec.
+- Within a turn, each newer spec (a `validate_spec` call, or an older spec
+  opened with `read_spec`) replaces the older one with "Left out: a newer
+  spec follows."
+- The model opens an older spec with `read_spec` only when the user asks for
+  it.
 
 ## Environment
 

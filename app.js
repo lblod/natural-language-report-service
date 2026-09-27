@@ -1,7 +1,7 @@
 import { app, errorHandler } from 'mu';
 import bodyParser from 'body-parser';
 import { loadProfiles } from './src/runner/profile.js';
-import { readConversation, readHistory, writeMessage } from './src/chat.js';
+import { readConversation, readHistory, writeMessage, deleteConversation } from './src/chat.js';
 import { wantsExecution } from './src/llm/mode.js';
 import { executeSpec, refineSpec } from './src/report-assistant.js';
 
@@ -61,6 +61,23 @@ app.post('/assistant/conversations/:id/turns', bodyParser.json(), async function
     } catch (e2) {
       console.error('[chat] could not write the failure message:', e2);
     }
+  }
+});
+
+// Delete a conversation with everything that hangs off it: the messages,
+// their bijlagen (triples and share files) and the reports. The read is the
+// access check: the caller's session decides what exists, so another user's
+// conversation is a 404.
+app.delete('/assistant/conversations/:id', async function(req, res) {
+  try {
+    const conversation = await readConversation(req.params.id);
+    if (!conversation) return res.status(404).json({ error: 'no such conversation' });
+    const removed = await deleteConversation(conversation.uri);
+    console.log(`[chat] deleted conversation ${req.params.id}, ${removed} share file(s) removed`);
+    res.status(204).send();
+  } catch (e) {
+    console.error('[chat] could not delete the conversation:', e);
+    res.status(500).json({ error: e.message });
   }
 });
 

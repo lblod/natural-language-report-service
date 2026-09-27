@@ -6,7 +6,7 @@
 // A bijlage is a real file: a logical nfo:FileDataObject the file service
 // serves at /files/<uuid>/download, over a physical share:// object with
 // nie:dataSource back to the logical one.
-import { readFileSync, writeFileSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, statSync, unlinkSync } from 'fs';
 import { query, update, uuid,
          sparqlEscapeUri, sparqlEscapeString, sparqlEscapeInt, sparqlEscapeDateTime } from 'mu';
 
@@ -32,6 +32,7 @@ const T = {
   format: 'http://purl.org/dc/terms/format',
   fileType: 'http://purl.org/dc/terms/type',
   dataSource: 'http://www.semanticdesktop.org/ontologies/2007/01/19/nie#dataSource',
+  generated: 'http://www.w3.org/ns/prov#generated',
 };
 const MESSAGE_BASE = 'http://data.lblod.info/id/chat-messages/';
 const FILE_BASE = 'http://data.lblod.info/files/';
@@ -209,4 +210,69 @@ export async function registerFile(shareName, format, type, name = shareName) {
     }`);
 
   return logical;
+}
+
+// --- deletes -------------------------------------------------------------------
+
+// deleteConversation(uri) → the share files it removed (a number). Deletes
+// the conversation, its messages, their bijlagen (the logical file and the
+// physical one under it) and the reports of those files, then removes the
+// share files. Everything runs as the caller, so the auth layer keeps a
+// user to their own conversation.
+export async function deleteConversation(conversationUri) {
+  // The bijlagen first: once the triples are gone their names cannot be
+  // found back.
+  const json = await query(`
+    SELECT DISTINCT ?doc ?name WHERE {
+      ?message ${u(T.hasContainer)} ${u(conversationUri)} ;
+        ${u(T.attachment)} ?doc .
+      OPTIONAL {
+        ?physical ${u(T.dataSource)} ?doc ;
+          ${u(T.fileName)} ?name .
+      }
+    }`);
+  const rows = bindings(json);
+  const docs = [...new Set(rows.map(b => b.doc.value))];
+  const names = [...new Set(rows.filter(b => b.name).map(b => b.name.value))];
+
+  await update(`
+    DELETE {
+      ?conversation ?cp ?co .
+    } WHERE {
+      VALUES ?conversation { ${u(conversationUri)} }
+      ?conversation ?cp ?co .
+    }`);
+
+  await update(`
+    DELETE {
+      ?message ?mp ?mo .
+    } WHERE {
+      ?message ${u(T.hasContainer)} ${u(conversationUri)} ;
+        ?mp ?mo .
+    }`);
+
+  if (docs.length) {
+    await update(`
+      DELETE {
+        ?doc ?dp ?do .
+        ?physical ?pp ?po .
+        ?report ?rp ?ro .
+      } WHERE {
+        VALUES ?doc { ${docs.map(u).join(' ')} }
+        ?doc ?dp ?do .
+        OPTIONAL { ?physical ${u(T.dataSource)} ?doc ; ?pp ?po . }
+        OPTIONAL { ?report ${u(T.generated)} ?doc ; ?rp ?ro . }
+      }`);
+  }
+
+  let removed = 0;
+  for (const name of names) {
+    try {
+      unlinkSync(`${SHARE_DIR}/${name}`);
+      removed++;
+    } catch {
+      // the file was already gone
+    }
+  }
+  return removed;
 }

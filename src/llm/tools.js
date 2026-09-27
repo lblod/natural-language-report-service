@@ -1,5 +1,5 @@
-// The tools the LLM calls, refinement only: list_profiles,
-// describe_profile, validate_spec, read_spec and lookup_values. Each returns
+// The tools the LLM calls, refinement only: describe_profile,
+// validate_spec, read_spec and lookup_values. Each returns
 // plain text for the model. No report is created, no spec is evaluated; the
 // database reads run under the service scope (public graph).
 import { parseSpec } from '../runner/spec.js';
@@ -11,22 +11,19 @@ import { readSpecFile } from '../chat.js';
 // The tool definitions sent to the model. The descriptions are what the LLM
 // reads to decide which tool to call.
 export const TOOLS = [
-  tool('list_profiles',
-    'List the report profiles available, with their id and title.',
-    {}),
   tool('describe_profile',
     'Describe one profile: its entities, fields, relations and labels. Inline the values of short code lists.',
-    { profile_id: 'The profile URI returned by list_profiles' }),
+    { profile_id: 'The profile URI from the profile list' }),
   tool('validate_spec',
     'Validate a report spec (Turtle). Returns "ok", followed by one line per rep:where saying where it applies, or one clear sentence saying what is wrong and what to write instead. No database is touched.',
     { spec: 'The spec as Turtle text' }),
   tool('read_spec',
-    'Return the Turtle of a spec bijlage, a ttl file attached to an earlier message in this conversation. Use it to reuse the agreed spec, or to read back an earlier proposal before you change it. Read-only.',
+    'Return the Turtle of a spec bijlage, a ttl file attached to an earlier message in this conversation. The current spec already comes with the user\'s message; use this only when the user asks for an older spec. Read-only.',
     { file_name: 'The file name of the spec bijlage, e.g. specificatie-<uuid>.ttl' }),
   tool('lookup_values',
     'Search a code list for a term so you can suggest concrete values for a filter (for sh:hasValue or sh:in). Returns up to 25 matches with their URIs and labels, a total, and an exact flag when a label equals the term. Reads candidate values only; it never runs the spec and never tells you how many subjects a spec would match. Read-only, no report is created.',
     {
-      profile_id: 'The profile URI returned by list_profiles',
+      profile_id: 'The profile URI from the profile list',
       field: 'The field as "entityLabel.fieldLabel", e.g. "bestuurseenheid.naam"',
       term: 'The Dutch word or name to search for',
     }),
@@ -49,7 +46,6 @@ function tool(name, description, params) {
 
 export async function runTool(name, args, profiles) {
   switch (name) {
-    case 'list_profiles': return listProfiles(profiles);
     case 'describe_profile': return describe(args, profiles);
     case 'validate_spec': return validateSpec(args, profiles);
     case 'read_spec': return readSpec(args);
@@ -58,7 +54,8 @@ export async function runTool(name, args, profiles) {
   }
 }
 
-function listProfiles(profiles) {
+// The profile list, in the system prompt: one line per profile.
+export function listProfiles(profiles) {
   return [...profiles.values()].map(p => `${p.title}  <${p.uri}>`).join('\n');
 }
 

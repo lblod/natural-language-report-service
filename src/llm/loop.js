@@ -8,10 +8,14 @@
 // confirm before anything executes; execution runs the agreed spec without
 // the LLM (../report-assistant.js).
 
-import { TOOLS, runTool } from './tools.js';
-import { SPEC_MEDIA_TYPE } from '../chat.js';
+import { TOOLS, runTool, listProfiles } from './tools.js';
+import { describeProfile } from './describe.js';
+import { parseSpec } from '../runner/spec.js';
+import { SPEC_MEDIA_TYPE, readSpecFile } from '../chat.js';
 
 const MAX_ROUNDS = Number(process.env.MAX_ROUNDS || 12);
+// What an older spec becomes: only the newest spec goes to the model in full.
+const LEFT_OUT = 'Left out: a newer spec follows.';
 const LLM_BASE_URL = process.env.LLM_BASE_URL;
 const LLM_MODEL = process.env.LLM_MODEL;
 const LLM_API_KEY = process.env.LLM_API_KEY;
@@ -25,7 +29,10 @@ const LOG_LLM = /^(true|1)$/i.test(process.env.LOG_LLM || '');
 // Dutch and asks the user to confirm.
 const REFINE_PROMPT = `You refine report specs with the user. You never write SPARQL and you never run a report.
 
-The profile lists what can be asked. Compose paths by chaining fields.
+The profile lists what can be asked. Compose paths by chaining fields. The
+profiles are listed at the end of this prompt. When there is a current spec,
+the menu of its profile follows them: use it, and call describe_profile only
+for another profile.
 
 Rules:
 - A column must end on a value, not on a link. Chain one more hop. Only when
@@ -61,9 +68,14 @@ for a filter, so your proposal names real values instead of guesses. That is
 the only database read you have, and it only suggests values: it never tells
 you whether a spec is good or how much it matches. The database you read may
 differ from the one the report runs on, so never treat a lookup as a check.
-Iterate with the user on the spec itself: paths, filters, columns. When the
-user wants an earlier spec changed, open it with read_spec and change what
-they asked for. Never call
+Iterate with the user on the spec itself: paths, filters, columns. The
+current spec, the last one in the conversation, comes with the user's
+message. When the user refines (other columns, filters or title), change the
+current spec. When the user asks for a different report, one that lists
+another kind of thing per row, start a new spec. Older specs show only as a
+bijlage name, and a spec you wrote before in this turn shows as "left out"
+once a newer one follows. Only when the user asks for an older spec, open it
+with read_spec and change that one. Never call
 run_report; there is no such tool here. When the spec is ready, ask the user
 to confirm execution. Then stop.
 
@@ -85,14 +97,17 @@ Reply to the user in Dutch. Earlier turns are context only. Answer the last one.
 // [{ role, content, attachments }], newest last. spec is the last spec
 // validate_spec accepted in this turn, or null.
 export async function ask(turns, profiles) {
-  const messages = [{ role: 'system', content: REFINE_PROMPT }, ...turns.map(withSpecHint)];
+  const current = currentSpec(turns);
+  const messages = [{ role: 'system', content: await systemPrompt(current, profiles) },
+    ...withCurrentSpec(turns.map(withSpecHint), current)];
   let spec = null;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const { message } = await chat(messages, TOOLS);
+    const { message } = await chat(newestSpecOnly(messages), TOOLS);
     messages.push(message);
     const calls = message.tool_calls || [];
     if (!calls.length) return { text: message.content || '', spec };
+    if (calls.some(c => c.function.name === 'validate_spec')) message.leftOut = { tool_calls: calls.map(leaveOutSpec) };
 
     for (const call of calls) {
       const args = parseArgs(call.function.arguments);
@@ -111,20 +126,85 @@ export async function ask(turns, profiles) {
         }
         spec = args.spec;
       }
-      messages.push({ role: 'tool', tool_call_id: call.id, content: result });
+      const reply = { role: 'tool', tool_call_id: call.id, content: result };
+      if (call.function.name === 'read_spec' && result.includes('ReportSpec')) reply.leftOut = { content: LEFT_OUT };
+      messages.push(reply);
     }
   }
   return { text: 'Sorry, dit rapport is te moeilijk. Contacteer de developers.', spec };
 }
 
-// The history carries the spec as a bijlage. Paste one hint line per spec
-// under the message text, so the model knows a spec is there and opens it
-// with read_spec; the chat itself still keeps the Turtle out of the text.
+// The history carries the spec as a bijlage, never as text. Paste one hint
+// line per spec under the message text, so the model knows a spec is there
+// and can open it with read_spec when the user asks for it. A spec the model
+// printed in its answer anyway is cut from the text.
 function withSpecHint(turn) {
+  const content = turn.role === 'assistant' ? withoutSpecText(turn.content) : turn.content;
   const specs = (turn.attachments || []).filter(a => a.mediaType === SPEC_MEDIA_TYPE);
-  if (!specs.length) return turn;
-  const hints = specs.map(a => `Bijlage "${a.name}", a spec file (read it with read_spec).`);
-  return { ...turn, content: `${turn.content}\n\n${hints.join('\n\n')}` };
+  if (!specs.length) return { ...turn, content };
+  const hints = specs.map(a => `Bijlage "${a.name}", a spec file.`);
+  return { ...turn, content: `${content}\n\n${hints.join('\n\n')}` };
+}
+
+function withoutSpecText(text) {
+  return text.replace(/```[\s\S]*?```/g, block => (block.includes('ReportSpec') ? '(spec left out)' : block));
+}
+
+// The current spec: the last spec bijlage in the conversation, or null.
+function currentSpec(turns) {
+  const name = turns.flatMap(t => t.attachments || [])
+    .filter(a => a.mediaType === SPEC_MEDIA_TYPE).at(-1)?.name;
+  const turtle = name && readSpecFile(name);
+  return turtle ? { name, turtle } : null;
+}
+
+// The system prompt also carries what the model would otherwise fetch at the
+// start of every turn: the profile list, and the menu of the current spec's
+// profile. Without a menu the model calls describe_profile itself.
+async function systemPrompt(current, profiles) {
+  const parts = [REFINE_PROMPT, `The profiles:\n${listProfiles(profiles)}`];
+  const uri = current && profileOf(current.turtle);
+  if (profiles.has(uri)) {
+    try {
+      parts.push(`The menu of the current spec's profile <${uri}>:\n\n${await describeProfile(profiles.get(uri))}`);
+    } catch (e) {
+      console.error('[llm] could not describe the current profile:', e.message);
+    }
+  }
+  return parts.join('\n\n');
+}
+
+function profileOf(turtle) {
+  try {
+    return parseSpec(turtle).profileUri;
+  } catch {
+    return null;
+  }
+}
+
+// The current spec goes in full under the user's new message: the one spec
+// the history holds as text.
+function withCurrentSpec(messages, current) {
+  if (!current) return messages;
+  const { name, turtle } = current;
+  const last = messages.at(-1);
+  return [...messages.slice(0, -1), {
+    ...last,
+    content: `${last.content}\n\nThe current spec, bijlage "${name}":\n\n${turtle}`,
+    leftOut: { content: `${last.content}\n\nThe current spec, bijlage "${name}": ${LEFT_OUT}` },
+  }];
+}
+
+// Only the newest spec goes to the model in full. A message that holds an
+// older one goes in its leftOut form; read_spec opens that spec again.
+function newestSpecOnly(messages) {
+  const newest = messages.findLastIndex(m => m.leftOut);
+  return messages.map((m, i) => (m.leftOut && i !== newest ? { ...m, ...m.leftOut } : m));
+}
+
+function leaveOutSpec(call) {
+  if (call.function.name !== 'validate_spec') return call;
+  return { ...call, function: { ...call.function, arguments: JSON.stringify({ spec: LEFT_OUT }) } };
 }
 
 // chat(messages, tools) → { message }. The one place that talks to the
