@@ -48,6 +48,9 @@ Rules:
   applies. Say that in Dutch in your proposal, so the user can check it.
 - Only offer what validate_spec accepted. Before you suggest an alternative,
   write it and validate it; if it does not validate, say it cannot be done.
+- One answer carries one spec, and one spec is one report on one profile. If
+  the question needs two reports, say so, propose the first, and offer the
+  second as the next step.
 - You cannot count, sort, take the first N, or compare two subjects. Say so.
 - The report's title is the dct:title you write in the spec. There is no other
   title input.
@@ -101,7 +104,13 @@ export async function ask(turns, profiles) {
       }
       // validate_spec answers "ok" (plus notes) when the spec checks out;
       // that spec becomes the bijlage of the answer.
-      if (call.function.name === 'validate_spec' && /^ok(\n|$)/.test(result)) spec = args.spec;
+      // One answer carries one spec: say so when this one replaces another.
+      if (call.function.name === 'validate_spec' && /^ok(\n|$)/.test(result)) {
+        if (spec && spec !== args.spec) {
+          result += '\nThis spec replaces the one you validated before. Your answer carries only this one.';
+        }
+        spec = args.spec;
+      }
       messages.push({ role: 'tool', tool_call_id: call.id, content: result });
     }
   }

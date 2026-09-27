@@ -53,7 +53,7 @@ nodes columns share, on every step; `rep:collect`) → CSV → register file
 
 ## The profile: a map of the data
 
-A profile lists the kinds of things in the data (entities), what each one
+A profile (using SHACL + some extensions) lists the kinds of things in the data (entities), what each one
 has (fields), and which fields lead to other entities (links). The app
 writes it; the service ships no profile and knows no vocabulary.
 
@@ -285,6 +285,7 @@ The validator (`src/runner/check.js`) runs on every proposal and again
 before every run. It returns the first problem, in words the LLM can act on.
 On top of the rules above, it checks that:
 
+- the Turtle holds one `rep:ReportSpec`, no more: one answer is one report;
 - every step of every path exists in the profile;
 - no path is longer than `MAX_PATH_DEPTH` steps;
 - a date or number test ends on a value field, not on a link;

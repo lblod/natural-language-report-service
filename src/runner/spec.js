@@ -13,8 +13,13 @@ export function parseSpec(turtle) {
   const quads = parser.parse(turtle);
   const store = new N3.Store(quads);
 
-  const specNode = store.getQuads(null, RDF + 'type', REP + 'ReportSpec')[0]?.subject;
-  if (!specNode) throw new Error('spec has no rep:ReportSpec');
+  const specNodes = store.getQuads(null, RDF + 'type', REP + 'ReportSpec').map(q => q.subject);
+  if (!specNodes.length) throw new Error('spec has no rep:ReportSpec');
+  // One spec is one report. A second one would pass unchecked and never run.
+  if (specNodes.length > 1) {
+    throw new Error(`one spec per answer. This Turtle has ${specNodes.length} rep:ReportSpec. Keep one, and offer the other as the next report.`);
+  }
+  const specNode = specNodes[0];
 
   const one = (s, pred) => store.getQuads(s, pred, null)[0]?.object || null;
 
