@@ -56,7 +56,7 @@ export function groupQuery(group, chunk) {
   return `SELECT DISTINCT ${vars.join(' ')} WHERE {\n  VALUES ?s { ${subjects} }\n  ${lines.join('\n  ')}\n}`;
 }
 
-export function collect(result, group, values) {
+function collect(result, group, values) {
   for (const b of result.results.bindings) {
     const chain = [...group.hops.slice(1).map((hop, i) => b[`x_${i + 1}`]), b.v];
     let perColumn = values.get(b.s.value);

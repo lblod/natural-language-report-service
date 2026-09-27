@@ -3,9 +3,8 @@
 // SDKs. Stops when the model answers without tool calls.
 //
 // Refinement only: the LLM proposes a spec, may look up candidate values in
-// code lists, explore the data and sample a draft spec (all on the public
-// graph, under the service scope) and iterates with the user. It never
-// runs a report and never learns what the report would hold. The user must
+// code lists (under the service scope) and iterates with the user. It never
+// runs a report and never learns what a spec would match. The user must
 // confirm before anything executes; execution runs the agreed spec without
 // the LLM (../report-assistant.js).
 
@@ -20,23 +19,10 @@ const LLM_API_KEY = process.env.LLM_API_KEY;
 const LOG_LLM = /^(true|1)$/i.test(process.env.LOG_LLM || '');
 
 // Refinement (Modus A). The LLM and the user iterate on a spec. The LLM may
-// look up candidate values in code lists (lookup_values), explore the data
-// of a target class (explore_data) and sample a draft spec (sample_spec),
-// all on the public graph under the service scope, but it may not run a
-// report and never learns how many subjects the report would match. It ends with a proposal in
+// look up candidate values in code lists (lookup_values, under the service
+// scope) to make concrete suggestions, but it may not run a report and never
+// learns how many subjects a spec would match. It ends with a proposal in
 // Dutch and asks the user to confirm.
-// explore_data and sample_spec are switched off for now (see tools.js). To
-// switch them back on, replace "That is the only database read ... as a
-// check." in REFINE_PROMPT with:
-//   Use explore_data to see what the data of a target class holds: its
-//   predicates, example values and links; call it on a linked class to follow
-//   a path. A predicate that is not in the profile cannot go in a spec. Use
-//   sample_spec on a spec that validates to see a few of its rows, and fix
-//   paths or filters that do not land where you expect. All three read only
-//   public data. The report runs as the user, on data you may not see, so a
-//   lookup or a sample is a hint, never a count and never a promise: do not
-//   tell the user how many rows the report will have, or that it will be
-//   empty.
 const REFINE_PROMPT = `You refine report specs with the user. You never write SPARQL and you never run a report.
 
 The profile lists what can be asked. Compose paths by chaining fields.

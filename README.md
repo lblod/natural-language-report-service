@@ -16,11 +16,9 @@ not. The answer picks one of two deterministic code paths.
 **Refinement (Modus A).** The LLM proposes a spec and explains in Dutch what
 it will list and filter. It may call `lookup_values` to search code lists for
 candidate values, so its filter suggestions name real values instead of
-guesses, `explore_data` to see the predicates, values and links of a target
-class, and `sample_spec` to see a few rows a draft spec finds. All three read
-the public graph only, under the service scope. The LLM never runs a report
-and never learns what the report would hold: the report runs as the user, on
-data the LLM may not see, so a sample is a hint, not a check. The user must confirm before anything executes.
+guesses. It never runs a report and never learns what a spec would match: the
+database it reads may differ from the one the report runs on, so a lookup is
+a suggestion, not a check. The user must confirm before anything executes.
 As long as the user has not given a clear command, the turn stays in this
 mode.
 
@@ -32,8 +30,7 @@ that no longer checks out, or a failed run each give a fixed Dutch failure
 message. Nothing is retried and no spec is rewritten.
 
 Only refinement has tools: `list_profiles`, `describe_profile`,
-`validate_spec`, `read_spec`, `lookup_values`, `explore_data` and
-`sample_spec`.
+`validate_spec`, `read_spec` and `lookup_values`.
 
 ## How it works
 
@@ -82,20 +79,19 @@ never a cell value.
 No report row, row count or run error ever reaches the LLM. A run starts
 after the turn's only LLM call (the mode check) and answers with fixed text.
 What the LLM does see: the conversation, the profiles, validator messages,
-spec files, and public data read under the service scope (inlined code
-lists, `lookup_values`, `explore_data` and `sample_spec`, see below).
+spec files, and public reference data read under the service scope (inlined
+code lists and `lookup_values`, see below).
 
-Keep it that way. Every database read the LLM drives goes through
-`publicQuery` (the service scope), never the caller's session, and none of
-them counts. `sample_spec` runs a draft spec's queries on the public graph
-only; it is not the report. `validate_spec` still says where each
+Keep it that way. Do not add a tool that previews, samples or counts what a
+spec would match, not even to catch a `rep:where` that hangs on the wrong
+node. That check stays on the profile: `validate_spec` says where each
 `rep:where` applies, and the proposal repeats it to the user.
 
 ### The service scope
 
-The LLM's own reads during refinement (`describe_profile`'s code lists,
-`lookup_values`, `explore_data` and `sample_spec`) run under a service
-scope, not the caller's session: `publicQuery` in `src/llm/explore.js`. mu's
+The LLM's own reads during refinement (`describe_profile`'s code lists and
+`lookup_values`) run under a service scope, not the caller's session:
+`publicQuery` in `src/llm/explore.js`. mu's
 `query(q, { scope })` sends `mu-auth-scope`; the sparql-parser config grants
 that scope read access to `http://mu.semte.ch/graphs/public` only. So
 refinement reads only the public graph, regardless of who calls. Execution
@@ -152,7 +148,7 @@ user sees is Dutch.
 | `SHARE_DIR` | `/share` | where CSVs are written |
 | `CHAT_ASSISTANT_URI` | `http://data.lblod.info/id/chat-agents/rapportassistent` | the `prov:SoftwareAgent` that signs assistant messages (the portal's chat-assistant migration seeds it) |
 | `CHAT_HISTORY_LIMIT` | `20` | messages of history a turn reads |
-| `SERVICE_SCOPE` | `http://services.semantic.works/natural-language-report` | the mu-auth-scope for the LLM's own reads (code lists, `lookup_values`, `explore_data`, `sample_spec`). Must match the `with-scope` grant in the app's sparql-parser config. |
+| `SERVICE_SCOPE` | `http://services.semantic.works/natural-language-report` | the mu-auth-scope for the LLM's own reads (code lists, `lookup_values`). Must match the `with-scope` grant in the app's sparql-parser config. |
 
 Do not set `ALLOW_MU_AUTH_SUDO`; the template then refuses sudo queries.
 
