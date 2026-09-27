@@ -1,5 +1,6 @@
 import N3 from 'n3';
 import { readFileSync, readdirSync } from 'fs';
+import { parseFilter, readRdfList } from './spec.js';
 
 // Parse a profile (a SHACL shapes graph) and answer questions about it.
 
@@ -41,8 +42,8 @@ function loadProfile(file) {
     const targetClass = store.getQuads(shape, SH + 'targetClass', null)[0]?.object.value || null;
     const label = store.getQuads(shape, 'http://www.w3.org/2000/01/rdf-schema#label', null)[0]?.object.value || null;
     const fields = store.getQuads(shape, SH + 'property', null).map(q => parseField(store, q.object));
-    const discriminator = parseDiscriminator(store, shape);
-    return { uri: shape.value, targetClass, label, fields, discriminator };
+    const discriminators = parseDiscriminators(store, shape);
+    return { uri: shape.value, targetClass, label, fields, discriminators };
   });
 
   return { uri, title, shapes: shapeList };
@@ -64,25 +65,49 @@ function parseField(store, p) {
     name: one(SH + 'name'),
     datatype: one(SH + 'datatype'),
     class: one(SH + 'class'),
-    node: one(SH + 'node'),
+    nodes: linkedShapes(store, p, one(SH + 'name')),
   };
 }
 
-// rep:discriminator tells shapes that share a targetClass apart. sh:minCount 1
-// becomes a plain triple in the seed, sh:maxCount 0 a FILTER NOT EXISTS.
-function parseDiscriminator(store, shape) {
-  const node = store.getQuads(shape, REP + 'discriminator', null)[0]?.object;
-  if (!node) return null;
-  const { path, inverse } = readPath(store, node);
-  const one = (pred) => store.getQuads(node, pred, null)[0]?.object?.value || null;
-  const minCount = one(SH + 'minCount');
-  const maxCount = one(SH + 'maxCount');
-  if (!path || (minCount === null && maxCount === null)) return null;
-  return {
-    path, inverse,
-    minCount: minCount !== null ? Number(minCount) : null,
-    maxCount: maxCount !== null ? Number(maxCount) : null,
+// The entities a field links to: its sh:node, or the sh:node of each item of
+// its sh:or (SHACL for "each value is one of these").
+function linkedShapes(store, p, name) {
+  const node = store.getQuads(p, SH + 'node', null)[0]?.object;
+  if (node) return [node.value];
+  const or = store.getQuads(p, SH + 'or', null)[0]?.object;
+  if (!or) return [];
+  return readRdfList(store, or).map(item => {
+    const n = store.getQuads(item, SH + 'node', null)[0]?.object;
+    if (!n) throw new Error(`field "${name}": every sh:or item needs a sh:node.`);
+    return n.value;
+  });
+}
+
+// rep:discriminator tells shapes that share a targetClass apart. A shape may
+// carry several; a subject meets them all.
+function parseDiscriminators(store, shape) {
+  return store.getQuads(shape, REP + 'discriminator', null)
+    .map(q => parseDiscriminator(store, q.object, shape.value));
+}
+
+// One discriminator: a condition written like a spec filter (sh:path plus
+// sh:minCount, sh:maxCount, sh:in, sh:hasValue, ...), or sh:and / sh:or (a
+// list) or sh:not (one) over discriminators, as in SHACL.
+function parseDiscriminator(store, node, shapeUri) {
+  const one = (pred) => store.getQuads(node, SH + pred, null)[0]?.object;
+  const list = (pred) => {
+    const items = readRdfList(store, one(pred)).map(x => parseDiscriminator(store, x, shapeUri));
+    if (!items.length) throw new Error(`rep:discriminator on <${shapeUri}> has an empty sh:${pred}.`);
+    return items;
   };
+  if (one('and')) return { and: list('and') };
+  if (one('or')) return { or: list('or') };
+  if (one('not')) return { not: parseDiscriminator(store, one('not'), shapeUri) };
+  const d = parseFilter(store, node);
+  if (!d.path.length || !Object.keys(d.constraints).length) {
+    throw new Error(`rep:discriminator on <${shapeUri}> needs a sh:path with a condition, or sh:and, sh:or or sh:not.`);
+  }
+  return d;
 }
 
 // The shape a spec starts from. rep:entity wins; a targetClass only resolves
@@ -100,9 +125,4 @@ export function shape(profile, shapeUri) {
 
 export function fieldsOf(profile, shapeUri) {
   return shape(profile, shapeUri)?.fields || [];
-}
-
-// The field a hop takes from a shape, or null.
-export function field(profile, shapeUri, hop) {
-  return fieldsOf(profile, shapeUri).find(f => f.path === hop.predicate && !!f.inverse === !!hop.inverse) || null;
 }

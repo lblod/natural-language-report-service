@@ -1,4 +1,4 @@
-import { startShape, fieldsOf, field } from './profile.js';
+import { startShape, fieldsOf } from './profile.js';
 import { NUMERIC_DATATYPES } from './assemble.js';
 import { sharedSteps } from './spec.js';
 
@@ -119,14 +119,10 @@ function collectMinMaxTyped(spec, profile) {
     const name = col.collect === SH + 'min' ? 'sh:min' : 'sh:max';
     if (!col.path.length) return `${name} on a rep:self column does not apply. A subject URI is not a number or date.`;
     const last = col.path[col.path.length - 1];
-    const shapeUri = shapeAfter(profile, startShapeUri, col.path);
-    if (!shapeUri) continue;   // pathsResolve already reported the real error
-    const f = field(profile, shapeUri, last);
-    if (!f) continue;
-    const kind = f.datatype === XSD_DATETIME || f.datatype === XSD_DATE ? 'date'
-      : NUMERIC_DATATYPES.has(f.datatype) ? 'number'
-      : null;
-    if (!kind) {
+    // no end field: pathsResolve already reported the real error
+    const f = endFields(profile, startShapeUri, col.path)
+      .find(x => x.datatype !== XSD_DATETIME && x.datatype !== XSD_DATE && !NUMERIC_DATATYPES.has(x.datatype));
+    if (f) {
       return `"${f.name || last.predicate}" is text, so ${name} does not apply. Use rep:row (same as leaving rep:collect out: every value gets its own row).`;
     }
   }
@@ -291,15 +287,15 @@ function rangeOnValue(spec, profile) {
     const key = ['minInclusive', 'maxInclusive', 'minExclusive', 'maxExclusive']
       .find(k => cond.constraints[k]);
     if (!key || !cond.path.length) continue;
-    const last = cond.path[cond.path.length - 1];
-    const f = field(profile, shapeAfter(profile, startShapeUri, cond.path), last);
-    if (!f || f.datatype) continue;   // pathsResolve reports a missing step
-    const target = f.node
-      ? `"${profile.shapes.find(s => s.uri === f.node)?.label || f.node}"`
+    // pathsResolve reports a missing step
+    const f = endFields(profile, startShapeUri, cond.path).find(x => !x.datatype);
+    if (!f) continue;
+    const target = f.nodes.length
+      ? f.nodes.map(uri => shapeName(profile, uri)).join(' or ')
       : `the code "${f.name}"`;
-    const steps = fieldsOf(profile, f.node)
+    const steps = [...new Set(f.nodes.flatMap(uri => fieldsOf(profile, uri))
       .filter(x => x.datatype === XSD_DATE || x.datatype === XSD_DATETIME || NUMERIC_DATATYPES.has(x.datatype))
-      .map(x => `${x.name} (${x.path})`);
+      .map(x => `${x.name} (${x.path})`))];
     const add = steps.length ? `Add a step: ${steps.join(' or ')}.` : 'End the path on a date or number field.';
     return `${what} ends on ${target}, not on a value, so sh:${key} never matches. ${add}`;
   }
@@ -316,15 +312,18 @@ export function whereNotes(spec, profile) {
   });
 }
 
-// The entity a path lands on, or the value field when it ends on one.
+// The entity a path lands on, or the value field when it ends on one. A
+// step that leads to several entities names them all.
 function nodeName(profile, startShapeUri, hops) {
-  let shapeUri = startShapeUri;
-  for (const [i, hop] of hops.entries()) {
-    const f = field(profile, shapeUri, hop);
-    if (!f) return `step ${hops.length}`;
-    if (!f.node) return i === hops.length - 1 ? `the value "${f.name}"` : `step ${hops.length}`;
-    shapeUri = f.node;
-  }
+  if (!hops.length) return shapeName(profile, startShapeUri);
+  const ends = endFields(profile, startShapeUri, hops);
+  if (!ends.length) return `step ${hops.length}`;
+  const value = ends.find(f => !f.nodes.length);
+  if (value) return `the value "${value.name}"`;
+  return [...new Set(ends.flatMap(f => f.nodes))].map(uri => shapeName(profile, uri)).join(' or ');
+}
+
+function shapeName(profile, shapeUri) {
   return `"${profile.shapes.find(s => s.uri === shapeUri)?.label || shapeUri}"`;
 }
 
@@ -367,17 +366,24 @@ export function checkSpec(spec, profiles) {
   return null;
 }
 
-// The shape a path lands in: follow sh:node through every hop but the
-// last. walk() has already validated the path, so a gap here means the walk
-// reported the real error and this can bail.
-function shapeAfter(profile, startShapeUri, hops) {
-  let shapeUri = startShapeUri;
-  for (let i = 0; i < hops.length - 1; i++) {
-    const f = field(profile, shapeUri, hops[i]);
-    if (!f || !f.node) return null;
-    shapeUri = f.node;
+// The fields a hop takes from any of the shapes a path has reached. A field
+// may link to several entities (sh:or of sh:node: an eenheid's political and
+// leidinggevende organen): the walk follows them all and the next steps
+// decide. The query follows predicates only, so this is what the data does.
+function hopFields(profile, shapeUris, hop) {
+  return shapeUris.flatMap(uri => fieldsOf(profile, uri)
+    .filter(f => f.path === hop.predicate && !!f.inverse === !!hop.inverse));
+}
+
+// The fields a path can end on: follow sh:node through every hop but the
+// last. walk() has already validated the path, so none here means the walk
+// reported the real error and the caller can bail.
+function endFields(profile, startShapeUri, hops) {
+  let shapeUris = [startShapeUri];
+  for (const hop of hops.slice(0, -1)) {
+    shapeUris = [...new Set(hopFields(profile, shapeUris, hop).flatMap(f => f.nodes))];
   }
-  return shapeUri;
+  return hopFields(profile, shapeUris, hops[hops.length - 1]);
 }
 
 function walk(profile, startShapeUri, hops, what, isColumn, wantsIri = false) {
@@ -385,30 +391,34 @@ function walk(profile, startShapeUri, hops, what, isColumn, wantsIri = false) {
     return `${what} walks ${hops.length} hops. The limit is ${MAX_PATH_DEPTH}.`;
   }
   if (!hops.length) return null;
-  let shapeUri = startShapeUri;
+  let shapeUris = [startShapeUri];
   for (let i = 0; i < hops.length; i++) {
     const hop = hops[i];
-    const fields = fieldsOf(profile, shapeUri);
-    const f = fields.find(x => x.path === hop.predicate && !!x.inverse === !!hop.inverse);
-    if (!f) {
-      const have = fields.map(x => (x.inverse ? `${x.name} (${x.path}, inverse)` : `${x.name} (${x.path})`)).join(', ');
-      const shapeLabel = profile.shapes.find(s => s.uri === shapeUri)?.label || shapeUri;
-      return `at "${shapeLabel}" there is no "${hop.predicate}". It has: ${have || '(nothing)'}.`;
+    const found = hopFields(profile, shapeUris, hop);
+    if (!found.length) {
+      const have = [...new Set(shapeUris.flatMap(uri => fieldsOf(profile, uri))
+        .map(x => (x.inverse ? `${x.name} (${x.path}, inverse)` : `${x.name} (${x.path})`)))].join(', ');
+      const shapeLabel = shapeUris.map(uri => shapeName(profile, uri)).join(' or ');
+      return `at ${shapeLabel} there is no "${hop.predicate}". It has: ${have || '(nothing)'}.`;
     }
     if (i < hops.length - 1) {
-      if (!f.node) {
+      const links = found.filter(f => f.nodes.length);
+      if (!links.length) {
         return `${what} hop ${i + 1} <${hop.predicate}> holds a value, not a link. You cannot walk past it.`;
       }
-      shapeUri = f.node;
+      shapeUris = [...new Set(links.flatMap(f => f.nodes))];
     } else if (isColumn) {
-      if (wantsIri && f.datatype) {
-        return `${what} has sh:nodeKind sh:IRI but ends on the value "${f.name}", which is no URI. Drop sh:nodeKind.`;
-      }
-      if (!wantsIri && !f.datatype && !f.class) {
-        const valueFields = fieldsOf(profile, f.node)
-          .filter(x => x.datatype || x.class)
-          .map(x => `${x.name} (${x.path})`);
-        return `${what} ends on a link. Add a hop: ${valueFields.join(' or ')}. Only if the user asked for the URI of that node itself, add sh:nodeKind sh:IRI to the column instead.`;
+      // every field the path can end on must suit the column
+      for (const f of found) {
+        if (wantsIri && f.datatype) {
+          return `${what} has sh:nodeKind sh:IRI but ends on the value "${f.name}", which is no URI. Drop sh:nodeKind.`;
+        }
+        if (!wantsIri && !f.datatype && !f.class) {
+          const valueFields = [...new Set(f.nodes.flatMap(uri => fieldsOf(profile, uri))
+            .filter(x => x.datatype || x.class)
+            .map(x => `${x.name} (${x.path})`))];
+          return `${what} ends on a link. Add a hop: ${valueFields.join(' or ')}. Only if the user asked for the URI of that node itself, add sh:nodeKind sh:IRI to the column instead.`;
+        }
       }
     }
   }

@@ -116,9 +116,10 @@ function resolveClass(profile, field) {
   if (!shape) return null;
   const f = shape.fields.find(x => x.name === fieldLabel);
   if (f?.class) return f.class;
-  if (f?.node) {
-    const linked = profile.shapes.find(s => s.uri === f.node);
-    return linked?.targetClass || null;
+  if (f?.nodes.length) {
+    // sh:or of several entities: only when they share one class
+    const classes = new Set(f.nodes.map(n => profile.shapes.find(s => s.uri === n)?.targetClass || null));
+    return classes.size === 1 ? [...classes][0] : null;
   }
   // The model sometimes writes shape.field on a linked shape
   // ("bestuurseenheid.naam"); resolve it to that shape's target class.

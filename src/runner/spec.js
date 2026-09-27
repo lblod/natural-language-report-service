@@ -31,7 +31,7 @@ export function parseSpec(turtle) {
   return { uri: specNode.value, title, profileUri, targetClass, entity, filters, columns };
 }
 
-function parseFilter(store, p) {
+export function parseFilter(store, p) {
   let path = [];
   const pathQuad = store.getQuads(p, SH + 'path', null)[0]?.object;
   if (pathQuad) path = parsePath(store, pathQuad);
@@ -134,7 +134,7 @@ function readConstraints(store, p, { withLabel = false } = {}) {
   return constraints;
 }
 
-function readRdfList(store, node) {
+export function readRdfList(store, node) {
   const items = [];
   let cur = node;
   while (cur && cur.value !== RDF + 'nil') {

@@ -25,7 +25,9 @@ export function seedPageQuery(spec, limit, offset, shape = null) {
   const parts = [];
   const targetClass = spec.targetClass || shape?.targetClass;
   parts.push(`?s a ${sparqlEscapeUri(targetClass)} .`);
-  if (shape?.discriminator) parts.push(discriminatorPattern(shape.discriminator));
+  (shape?.discriminators || []).forEach((d, di) => {
+    parts.push(discriminatorPattern(d, `disc${di}`));
+  });
   spec.filters.forEach((filter, fi) => {
     parts.push(filterPattern(filter, `f${fi}`));
   });
@@ -36,13 +38,20 @@ LIMIT ${limit} OFFSET ${offset}`;
 }
 
 // A shape that shares its class with another says here what sets its
-// subjects apart: sh:minCount 1 is a plain triple, sh:maxCount 0 a NOT EXISTS.
-function discriminatorPattern(d) {
-  const p = sparqlEscapeUri(d.path);
-  const triple = d.inverse ? `?disc ${p} ?s .` : `?s ${p} ?disc .`;
-  if (d.minCount !== null && d.minCount >= 1) return triple;
-  if (d.maxCount === 0) return `FILTER NOT EXISTS { ${triple} }`;
-  return null;
+// subjects apart. A plain discriminator is a filter; sh:and, sh:or and sh:not
+// become one FILTER over EXISTS tests, which see ?s from outside.
+function discriminatorPattern(d, varPrefix) {
+  if (!d.and && !d.or && !d.not) return filterPattern(d, varPrefix);
+  return `FILTER(${discriminatorTest(d, varPrefix)})`;
+}
+
+function discriminatorTest(d, varPrefix) {
+  if (d.and) return `(${d.and.map((x, i) => discriminatorTest(x, `${varPrefix}_${i}`)).join(' && ')})`;
+  if (d.or) return `(${d.or.map((x, i) => discriminatorTest(x, `${varPrefix}_${i}`)).join(' || ')})`;
+  if (d.not) return `!(${discriminatorTest(d.not, `${varPrefix}_n`)})`;
+  const { maxCount, ...test } = d.constraints;
+  if (maxCount === 0) return `NOT EXISTS { ${filterPattern({ ...d, constraints: test }, varPrefix)} }`;
+  return `EXISTS { ${filterPattern(d, varPrefix)} }`;
 }
 
 // Writes out every hop as its own triple pattern.
@@ -66,13 +75,15 @@ export function hopsPattern(hops, varPrefix, startVar, lastVar = `?${varPrefix}_
 }
 
 // One filter: its condition, plus its rep:where conditions on the nodes it
-// walks through. With sh:maxCount 0 the whole of it becomes "none such".
+// walks through. With sh:maxCount 0 the whole of it becomes "none such";
+// with a value test too (sh:in, sh:hasValue, ...), "none with such a value".
 function filterPattern(filter, varPrefix) {
+  const { maxCount, ...test } = filter.constraints;
+  if (maxCount === 0) {
+    return `FILTER NOT EXISTS {\n    ${filterPattern({ ...filter, constraints: test }, varPrefix)}\n  }`;
+  }
   const nodeVar = (k) => (k === filter.path.length ? `?${varPrefix}_v` : `?${varPrefix}_${k}`);
   const wheres = wherePatterns(filter.where, filter.path, nodeVar, varPrefix);
-  if (filter.constraints.maxCount === 0) {
-    return `FILTER NOT EXISTS {\n    ${[hopsPattern(filter.path, varPrefix, '?s'), ...wheres].join('\n    ')}\n  }`;
-  }
   return [conditionPattern(filter.constraints, varPrefix, filter.path, '?s'), ...wheres].join('\n  ');
 }
 
@@ -89,10 +100,11 @@ export function wherePatterns(where, hostHops, nodeVar, varPrefix) {
 // A condition: the hops from startVar and the test on where they end. A
 // filter starts at ?s; a rep:where starts at a node of its host and, with no
 // hops left, tests that node itself. sh:maxCount 0 means "none such", so its
-// hops only live inside the NOT EXISTS.
+// hops and any value test only live inside the NOT EXISTS.
 export function conditionPattern(c, varPrefix, hops, startVar) {
   if (c.maxCount === 0) {
-    return `FILTER NOT EXISTS { ${hopsPattern(hops, varPrefix + '_nex', startVar)} }`;
+    const { maxCount, ...test } = c;
+    return `FILTER NOT EXISTS { ${conditionPattern(test, varPrefix + '_nex', hops, startVar)} }`;
   }
   const v = hops.length ? `?${varPrefix}_v` : startVar;
   const parts = hops.length ? [hopsPattern(hops, varPrefix, startVar)] : [];

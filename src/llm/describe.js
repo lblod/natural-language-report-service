@@ -23,6 +23,7 @@ sh:targetClass is the full URI in brackets after the entity below.
 In sh:path, use the predicate URI shown after each field name, not the field name itself.
 An inverse hop (the field shows "(inverse)") goes in the list as [ sh:inversePath <predicate> ] .
 When two entities share one sh:targetClass, pick one with rep:entity <the URI after the entity>.
+A field that links to several entities ("→ a or b") reaches all of them; the steps after it decide. To keep one kind, add a rep:where on a step only that kind has.
 A date filter is sh:minInclusive or sh:maxInclusive with "yyyy-mm-dd"^^xsd:dateTime
 (the xsd prefix above is not copied: add @prefix xsd: <http://www.w3.org/2001/XMLSchema#>).
 `];
@@ -31,7 +32,7 @@ A date filter is sh:minInclusive or sh:maxInclusive with "yyyy-mm-dd"^^xsd:dateT
     for (const f of shape.fields) {
       const kind = f.datatype ? datatypeName(f.datatype)
         : f.class ? `→ ${conceptLabel(f.class, await codeList(f.class))}`
-        : f.node ? `→ ${linkedLabel(profile, f.node)}`
+        : f.nodes.length ? `→ ${f.nodes.map(n => linkedLabel(profile, n)).join(' or ')}`
         : '?';
       const dir = f.inverse ? ' (inverse)' : '';
       const pathShown = f.path || '?';
