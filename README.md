@@ -61,7 +61,8 @@ values from the cell, never rows. The app's `report-spec-readme.md` has the
 details and an example.
 
 The run: check → seed (`SELECT DISTINCT ?s`, paged) → columns (per group, per
-chunk of subjects) → assemble (dedup + `rep:collect`) → CSV → register file
+chunk of subjects, with the nodes on each path) → assemble (pair by the
+nodes columns share, on every step; `rep:collect`) → CSV → register file
 + report resource. One run per confirmed spec.
 
 ## One identity: mu-authorization's

@@ -25,6 +25,18 @@ const LOG_LLM = /^(true|1)$/i.test(process.env.LOG_LLM || '');
 // all on the public graph under the service scope, but it may not run a
 // report and never learns how many subjects the report would match. It ends with a proposal in
 // Dutch and asks the user to confirm.
+// explore_data and sample_spec are switched off for now (see tools.js). To
+// switch them back on, replace "That is the only database read ... as a
+// check." in REFINE_PROMPT with:
+//   Use explore_data to see what the data of a target class holds: its
+//   predicates, example values and links; call it on a linked class to follow
+//   a path. A predicate that is not in the profile cannot go in a spec. Use
+//   sample_spec on a spec that validates to see a few of its rows, and fix
+//   paths or filters that do not land where you expect. All three read only
+//   public data. The report runs as the user, on data you may not see, so a
+//   lookup or a sample is a hint, never a count and never a promise: do not
+//   tell the user how many rows the report will have, or that it will be
+//   empty.
 const REFINE_PROMPT = `You refine report specs with the user. You never write SPARQL and you never run a report.
 
 The profile lists what can be asked. Compose paths by chaining fields.
@@ -56,15 +68,10 @@ Rules:
 
 You are in refinement mode. You propose a spec and explain in Dutch what it
 will list and filter. Use lookup_values to find concrete values (names, codes)
-for a filter, so your proposal names real values instead of guesses. Use
-explore_data to see what the data of a target class holds: its predicates,
-example values and links; call it on a linked class to follow a path. A
-predicate that is not in the profile cannot go in a spec. Use sample_spec on
-a spec that validates to see a few of its rows, and fix paths or filters that
-do not land where you expect. All three read only public data. The report
-runs as the user, on data you may not see, so a lookup or a sample is a hint,
-never a count and never a promise: do not tell the user how many rows the
-report will have, or that it will be empty.
+for a filter, so your proposal names real values instead of guesses. That is
+the only database read you have, and it only suggests values: it never tells
+you whether a spec is good or how much it matches. The database you read may
+differ from the one the report runs on, so never treat a lookup as a check.
 Iterate with the user on the spec itself: paths, filters, columns. When the
 user wants an earlier spec changed, open it with read_spec and change what
 they asked for. Never call

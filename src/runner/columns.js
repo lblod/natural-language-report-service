@@ -4,11 +4,14 @@ import { hopsPattern, wherePatterns } from './seed.js';
 // Fetch column values for known subjects. Columns are grouped by their
 // shared non-leaf hops; two columns share a query only when every hop
 // before the leaf is identical, and the leaf is read the same way.
-// rep:self columns (empty path) are filled by assemble.js.
+// rep:self columns (empty path) are filled by assemble.js. Every query
+// returns the nodes on the path too, so assemble.js can pair columns by the
+// nodes they share.
 
 const SUBJECT_CHUNK_SIZE = Math.max(1, Number(process.env.SUBJECT_CHUNK_SIZE) || 100);
 
-// fetchColumns(subjects, spec) → subject → column index → [term]
+// fetchColumns(subjects, spec) → subject → column index → [chain], a chain
+// being the terms on the path, one per step, the value last.
 export async function fetchColumns(subjects, spec) {
   const values = new Map();
   const groups = groupColumns(spec.columns);
@@ -49,17 +52,19 @@ export function groupQuery(group, chunk) {
   // the end.
   const nodeVar = (k) => (k === group.hops.length ? '?v' : `?x_${k}`);
   lines.push(...wherePatterns(group.where, group.hops, nodeVar, 'c'));
-  return `SELECT ?s ?v WHERE {\n  VALUES ?s { ${subjects} }\n  ${lines.join('\n  ')}\n}`;
+  const vars = ['?s', ...group.hops.slice(1).map((hop, i) => `?x_${i + 1}`), '?v'];
+  return `SELECT DISTINCT ${vars.join(' ')} WHERE {\n  VALUES ?s { ${subjects} }\n  ${lines.join('\n  ')}\n}`;
 }
 
 export function collect(result, group, values) {
   for (const b of result.results.bindings) {
+    const chain = [...group.hops.slice(1).map((hop, i) => b[`x_${i + 1}`]), b.v];
     let perColumn = values.get(b.s.value);
     if (!perColumn) { perColumn = new Map(); values.set(b.s.value, perColumn); }
     for (const col of group.columns) {
       let list = perColumn.get(col.index);
       if (!list) { list = []; perColumn.set(col.index, list); }
-      list.push(b.v);
+      list.push(chain);
     }
   }
 }

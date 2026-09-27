@@ -30,15 +30,17 @@ export const TOOLS = [
       field: 'The field as "entityLabel.fieldLabel", e.g. "bestuurseenheid.naam"',
       term: 'The Dutch word or name to search for',
     }),
-  tool('explore_data',
-    'Show a sample of the public data of one sh:targetClass of the profile: the predicates its instances use (outgoing and incoming), a few example values, the class of linked nodes, and which profile field each predicate is. Call it again on a linked class to follow a path. A predicate not in the profile cannot be used in a spec. A sample, not a check: it never runs a spec and counts nothing.',
-    {
-      profile_id: 'The profile URI returned by list_profiles',
-      class: 'The sh:targetClass URI, as describe_profile shows it',
-    }),
-  tool('sample_spec',
-    'Run a spec that passes validate_spec on the public data and return the rows of up to 10 subjects it finds there. Use it to see whether its paths and filters land where you expect. Public data only: the report runs as the user and may find other rows, so an empty or short sample says nothing about the report. It does not attach the spec; validate_spec does.',
-    { spec: 'The spec as Turtle text' }),
+  // Switched off for now: too much context for the LLM. To switch back on,
+  // uncomment these two, their cases in runTool, and the text in loop.js.
+  // tool('explore_data',
+  //   'Show a sample of the public data of one sh:targetClass of the profile: the predicates its instances use (outgoing and incoming), a few example values, the class of linked nodes, and which profile field each predicate is. Call it again on a linked class to follow a path. A predicate not in the profile cannot be used in a spec. A sample, not a check: it never runs a spec and counts nothing.',
+  //   {
+  //     profile_id: 'The profile URI returned by list_profiles',
+  //     class: 'The sh:targetClass URI, as describe_profile shows it',
+  //   }),
+  // tool('sample_spec',
+  //   'Run a spec that passes validate_spec on the public data and return the rows of up to 10 subjects it finds there. Use it to see whether its paths and filters land where you expect. Public data only: the report runs as the user and may find other rows, so an empty or short sample says nothing about the report. It does not attach the spec; validate_spec does.',
+  //   { spec: 'The spec as Turtle text' }),
 ];
 
 function tool(name, description, params) {
@@ -63,8 +65,8 @@ export async function runTool(name, args, profiles) {
     case 'validate_spec': return validateSpec(args, profiles);
     case 'read_spec': return readSpec(args);
     case 'lookup_values': return lookup(args, profiles);
-    case 'explore_data': return explore(args, profiles);
-    case 'sample_spec': return sample(args, profiles);
+    // case 'explore_data': return explore(args, profiles);
+    // case 'sample_spec': return sample(args, profiles);
     default: return `unknown tool "${name}"`;
   }
 }

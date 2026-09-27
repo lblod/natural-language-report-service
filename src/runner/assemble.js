@@ -1,13 +1,18 @@
-// Values to rows. Subjects in stable order, dedup on term, collect per cell.
-// rep:self columns take the subject URI; a column with no values is an
-// empty cell, never a dropped row. A column without rep:collect joins its
-// values only when there is one; with several, each value gets its own row
-// (the other columns repeat theirs). rep:row forces that expansion; at most
-// one column per spec may do that explicitly (checked in check.js).
+import { sharedSteps } from './spec.js';
+
+// Values to rows, paired by URI on every step. Two columns that walk the
+// same steps (with the same rep:where on them) share the nodes on those
+// steps, the way a rep:where shares nodes with its column. Per subject the
+// paths of the columns make a tree of the nodes found; every row is one way
+// down that tree. Columns through the same node stay on one row; branches
+// under one node multiply. A column with no value is an empty cell, never a
+// dropped row. sh:groupConcat, sh:min and sh:max fold a column into one cell
+// per node it shares with the other columns. rep:self takes the subject
+// URI. Subjects in stable order; identical rows appear once.
 
 const SH = 'http://www.w3.org/ns/shacl#';
-const REP = 'http://mu.semte.ch/vocabularies/reporting/';
 const XSD = 'http://www.w3.org/2001/XMLSchema#';
+const FOLDING = [SH + 'groupConcat', SH + 'min', SH + 'max'];
 
 export const NUMERIC_DATATYPES = new Set([
   'integer', 'decimal', 'double', 'float', 'long', 'int', 'short', 'byte',
@@ -15,45 +20,98 @@ export const NUMERIC_DATATYPES = new Set([
   'unsignedLong', 'unsignedInt', 'unsignedShort', 'unsignedByte',
 ].map(d => XSD + d));
 
+// assemble(subjects, values, spec) → rows, the header first. values:
+// subject → column index → chains, one term per step (see columns.js).
 export function assemble(subjects, values, spec) {
-  const sorted = [...subjects].sort();
+  const tree = columnTree(spec.columns);
   const rows = [spec.columns.map(c => c.label)];
-  for (const subject of sorted) {
-    const perColumn = values.get(subject) || new Map();
-    const cells = spec.columns.map((col, i) => {
-      if (!col.path.length) return [subject];   // rep:self
-      const list = dedup(perColumn.get(i) || []);
-      return collect(list, col);
-    });
-    const lines = Math.max(1, ...cells.map(c => c.length));
-    for (let r = 0; r < lines; r++) {
-      // the expanding cell cycles its values, every other cell keeps its
-      // value on each line
-      rows.push(cells.map(c => c[Math.min(r, c.length - 1)]));
+  for (const subject of [...subjects].sort()) {
+    const top = { term: { value: subject }, below: new Map() };
+    for (const [index, chains] of values.get(subject) || []) {
+      for (const chain of chains) addChain(top, tree.paths[index], chain);
+    }
+    const seen = new Set();
+    for (const cells of rowsAt(tree.root, top, tree, spec.columns)) {
+      const row = spec.columns.map((col, i) => cells.get(i) ?? '');
+      const key = JSON.stringify(row);
+      if (!seen.has(key)) {
+        seen.add(key);
+        rows.push(row);
+      }
     }
   }
   return rows;
 }
 
-function collect(terms, col) {
-  switch (col.collect) {
-    case SH + 'groupConcat':
-      return [terms.map(t => t.value).join(col.separator ?? ',')];
-    case undefined:
-    case null:
-      // no rep:collect: one value is a normal cell, several values each
-      // get their own row instead of a joined string
-      if (terms.length <= 1) return [terms.map(t => t.value).join(',')];
-      return terms.map(t => t.value);
-    case SH + 'min':
-      return [extreme(terms, col, -1)];
-    case SH + 'max':
-      return [extreme(terms, col, 1)];
-    case REP + 'row':
-      return terms.length ? terms.map(t => t.value) : [''];
-    default:
-      throw new Error(`column "${col.label}" has an unknown rep:collect <${col.collect}>. Use sh:groupConcat, rep:row, sh:min or sh:max.`);
+// The steps of all columns as one tree of branches. Two columns share a
+// branch as long as they took the same steps with the same rep:where on
+// them. paths[i] lists the branches column i goes through; a branch knows
+// the columns that end on it and the columns that go through it.
+function columnTree(columns) {
+  const newBranch = () => ({ next: new Map(), ends: [], columns: [] });
+  const root = newBranch();
+  const paths = columns.map((col, index) => {
+    let branch = root;
+    const branches = col.path.map((hop, k) => {
+      const where = col.where.filter(w => sharedSteps(col.path, w.path) === k + 1);
+      const key = `${hop.inverse ? '^' : ''}${hop.predicate} ${JSON.stringify(where)}`;
+      if (!branch.next.has(key)) branch.next.set(key, newBranch());
+      branch = branch.next.get(key);
+      branch.columns.push(index);
+      return branch;
+    });
+    branch.ends.push(index);
+    return branches;
+  });
+  return { root, paths };
+}
+
+// One path the store returned, subject to value, into the tree of nodes
+// found for that subject. Nodes are keyed by value: a node reached twice is
+// one node, a value found twice under one node is one value.
+function addChain(found, branches, chain) {
+  branches.forEach((branch, k) => {
+    if (!found.below.has(branch)) found.below.set(branch, new Map());
+    const byValue = found.below.get(branch);
+    if (!byValue.has(chain[k].value)) byValue.set(chain[k].value, { term: chain[k], below: new Map() });
+    found = byValue.get(chain[k].value);
+  });
+}
+
+// The rows under one found node: its own cells, times the rows of each
+// branch below it. A branch where nothing was found adds empty cells.
+function rowsAt(branch, found, tree, columns) {
+  let rows = [new Map(branch.ends.map(i => [i, found.term.value]))];
+  for (const next of branch.next.values()) {
+    const nodes = [...(found.below.get(next)?.values() || [])];
+    const below = next.columns.every(i => FOLDING.includes(columns[i].collect))
+      ? [fold(next, nodes, tree, columns)]
+      : nodes.length ? nodes.flatMap(node => rowsAt(next, node, tree, columns)) : [new Map()];
+    rows = rows.flatMap(row => below.map(cells => new Map([...row, ...cells])));
   }
+  return rows;
+}
+
+// A branch where every column folds gives one set of cells: per column, all
+// its values in the branch, folded into one cell.
+function fold(branch, nodes, tree, columns) {
+  const cells = new Map();
+  for (const i of branch.columns) {
+    const rest = tree.paths[i].slice(tree.paths[i].indexOf(branch) + 1);
+    const terms = nodes.flatMap(node => termsBelow(node, rest));
+    const unique = [...new Map(terms.map(t => [t.value, t])).values()];
+    const col = columns[i];
+    cells.set(i, col.collect === SH + 'groupConcat'
+      ? unique.map(t => t.value).join(col.separator ?? ',')
+      : extreme(unique, col, col.collect === SH + 'min' ? -1 : 1));
+  }
+  return cells;
+}
+
+function termsBelow(node, rest) {
+  if (!rest.length) return [node.term];
+  const byValue = node.below.get(rest[0]);
+  return byValue ? [...byValue.values()].flatMap(next => termsBelow(next, rest.slice(1))) : [];
 }
 
 // min/max. Numbers compare as numbers. Dates and times compare as text:
@@ -71,18 +129,4 @@ function extreme(terms, col, direction) {
   const cmp = (a, b) => a < b ? -1 : a > b ? 1 : 0;
   const best = terms.reduce((a, b) => (cmp(key(b), key(a)) * direction > 0 ? b : a));
   return best.value;
-}
-
-// Two terms are the same when the URIs match, or lexical form, datatype
-// and language tag all match.
-export function dedup(terms) {
-  const seen = new Set();
-  const out = [];
-  for (const t of terms) {
-    const key = t.termType === 'NamedNode'
-      ? `u:${t.value}`
-      : `l:${t.value}|${t.datatype?.value || ''}|${t.language || ''}`;
-    if (!seen.has(key)) { seen.add(key); out.push(t); }
-  }
-  return out;
 }
