@@ -22,7 +22,7 @@ natural-language-report:
     - ./data/files:/share
     - ./config/report-profiles:/config/profiles
   environment:
-    LLM_BASE_URL: "https://api.scaleway.ai/v1"
+    LLM_BASE_URL: "http://openai-compatible-endpoint.example/v1"
     LLM_MODEL: "glm-5.2"
     LLM_API_KEY: "..."
 ```
@@ -47,9 +47,7 @@ The service needs two things from the app:
   kinds of things, their fields and the links between them. The service
   knows no vocabulary of its own. The tutorial below writes one.
 - **An LLM.** Any OpenAI-compatible endpoint with tool calls, set with
-  `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`. The example uses GLM 5.2,
-  an open-weight model, on Scaleway: hosted in the EU, prompts not stored
-  and not used for training. A local Ollama works too.
+  `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`.
 
 The app also needs the chat resources in mu-cl-resources, the agent that
 signs the answers (`CHAT_ASSISTANT_URI`) and the two bijlage types (see
@@ -176,7 +174,7 @@ lists.
 
 | Name | Default | Meaning |
 |---|---|---|
-| `LLM_BASE_URL` | | OpenAI-compatible endpoint, for example `https://api.scaleway.ai/v1`. Without it every turn answers with a failure text. |
+| `LLM_BASE_URL` | | OpenAI-compatible endpoint, for example `http://openai-compatible-endpoint.example/v1`. Without it every turn answers with a failure text. |
 | `LLM_MODEL` | | for example `glm-5.2` |
 | `LLM_API_KEY` | | bearer token, not needed for a local Ollama |
 | `PROFILE_DIR` | `/config/profiles` | folder with the profiles, one `.ttl` file each |
