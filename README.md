@@ -433,17 +433,12 @@ report. Filter suggestions read only what the service scope may read.
 
 The LLM could write SPARQL directly. This we didn't do, becauuse:
 
-- Safety. Even when the service runs the query, the LLM decides what it
-  does. With SPARQL it can do odd things.
-- SPARQL can do too much to check it against the profile. A report needs
-  rows of one class, some filters and some columns. A spec only says that,
-  so all of it can be checked.
-- A report is often several queries: first the rows, then the columns in
-  batches, joined on URI. The service does this. One big query with an
-  `OPTIONAL` per column is slow and repeats rows.
-- A spec is RDF, so it can be stored in the database, linked to its report
-  and shared. Anyone who runs it gets the rows they may see. Today it is
-  stored as a file.
-  - The spec can be reused in totally different contexts.
+- A report is often multiple SPARQL queries.
+  - It's technically possible to convert a SPARQL to SPIN, and validate this against SHACL profile.
+    - But; this leaves the control of execution to the database. And this is often where the query fails.
+- It's more portable.
+- Safety. LLM could go wild with a SPARQL; it's harder to validate.
+- Smaller problem space for the model, hence some vague hope a smaller model can be used.
+- SPARQL can do too much to check it. A spec only says rows, filters and columns, so all of it can be checked.
 
 This doesn't come for free of course.
