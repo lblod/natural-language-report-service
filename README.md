@@ -191,6 +191,9 @@ lists.
 | `SEED_PAGE_SIZE` | `5000` | page size when the run fetches the rows |
 | `SUBJECT_CHUNK_SIZE` | `100` | rows per column query; lower it when the database refuses long queries |
 | `MAX_ROUNDS` | `12` | LLM calls per turn while it writes a spec |
+| `LLM_RETRIES` | `3` | retries of an LLM call that fails on the network (no connection, a reset, no answer) or with a status in `LLM_RETRY_STATUS`. Other failures fail at once. |
+| `LLM_RETRY_STATUS` | `500,502,503,504` | the statuses that are retried; add for example `429` or `408` |
+| `LLM_RETRY_DELAY` | `2000` | ms before the first retry; each next one waits twice as long. A `Retry-After` from the provider wins, up to 60 s. |
 | `LOG_LLM` | `false` | log every LLM request and response |
 
 ### API

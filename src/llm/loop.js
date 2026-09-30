@@ -17,6 +17,14 @@ const LLM_MODEL = process.env.LLM_MODEL;
 const LLM_API_KEY = process.env.LLM_API_KEY;
 // LOG_LLM=1 dumps every request to and response from the provider, verbatim.
 const LOG_LLM = /^(true|1)$/i.test(process.env.LOG_LLM || '');
+// A call that fails on the network or with a status in LLM_RETRY_STATUS is
+// tried again LLM_RETRIES times. The first retry waits LLM_RETRY_DELAY ms,
+// every next one twice as long. Any other failure is thrown at once.
+const LLM_RETRIES = Number(process.env.LLM_RETRIES || 3);
+const LLM_RETRY_DELAY = Number(process.env.LLM_RETRY_DELAY || 2000);
+const LLM_RETRY_STATUS = (process.env.LLM_RETRY_STATUS || '500,502,503,504').split(',').map(Number);
+// A Retry-After longer than this is not waited for.
+const MAX_RETRY_AFTER = 60000;
 
 const REFINE_PROMPT = `You refine report specs with the user. You never write SPARQL and you never run a report.
 
@@ -230,23 +238,52 @@ export async function chat(messages, tools = null) {
   } else {
     console.log('[llm] sending instructions to llm');
   }
-  const res = await fetch(`${LLM_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(LLM_API_KEY ? { Authorization: `Bearer ${LLM_API_KEY}` } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`LLM ${res.status}: ${t.slice(0, 300)}`);
-  }
-  const data = await res.json();
+  const data = await post(body);
   if (LOG_LLM) {
     console.log(`[llm] response:\n${JSON.stringify(data, null, 2)}`);
   }
   return { message: data.choices[0].message };
+}
+
+// POST to the provider, with retries. A network error or a status in
+// LLM_RETRY_STATUS waits and tries again; the last failure is thrown.
+async function post(body) {
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(`${LLM_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(LLM_API_KEY ? { Authorization: `Bearer ${LLM_API_KEY}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      // No connection, a reset or no answer at all: always worth another try.
+      if (attempt >= LLM_RETRIES) throw e;
+      await pause(attempt, null, `${e.message}${e.cause?.code ? ` (${e.cause.code})` : ''}`);
+      continue;
+    }
+    if (res.ok) return res.json();
+    const t = await res.text();
+    if (!LLM_RETRY_STATUS.includes(res.status) || attempt >= LLM_RETRIES) {
+      throw new Error(`LLM ${res.status}: ${t.slice(0, 300)}`);
+    }
+    await pause(attempt, res.headers.get('retry-after'), `LLM ${res.status}`);
+  }
+}
+
+// Waits before the next try: exponential back-off with some jitter, so
+// turns that failed together do not retry together. A provider's
+// Retry-After (in seconds) wins when it asks for longer, up to
+// MAX_RETRY_AFTER.
+async function pause(attempt, retryAfter, reason) {
+  const backoff = LLM_RETRY_DELAY * 2 ** attempt * (1 + Math.random() / 2);
+  const asked = Number(retryAfter) * 1000;
+  const wait = asked > backoff ? Math.min(asked, MAX_RETRY_AFTER) : backoff;
+  console.log(`[llm] ${reason}; retry ${attempt + 1}/${LLM_RETRIES} in ${Math.round(wait / 1000)}s`);
+  await new Promise(resolve => setTimeout(resolve, wait));
 }
 
 function parseArgs(s) {
