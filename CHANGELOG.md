@@ -1,3 +1,7 @@
+## v0.3.0 (2026-09-30)
+
+- Rertry on LLM connection fail.
+
 ## v0.2.0 (2026-09-27)
 
 #### :memo: Documentation
