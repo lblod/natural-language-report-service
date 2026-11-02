@@ -125,15 +125,19 @@ export async function writeMessage({ conversationUri, content, maker, attachment
   return id;
 }
 
-// The report of one run, pointing at the logical file of its CSV.
-export async function registerReport(title, fileUri) {
+// The report of one run, pointing at the logical file of its CSV. The
+// description is the short Dutch text written from the conversation.
+export async function registerReport(title, fileUri, description) {
   const id = uuid();
+  const descriptionLine = description
+    ? `dct:description ${sparqlEscapeString(description)} ;\n        `
+    : '';
   await update(`${PREFIXES}
     INSERT DATA {
       ${sparqlEscapeUri(`${REPORT_BASE}${id}`)} a ${sparqlEscapeUri(REPORT_CLASS)} ;
         mu:uuid ${sparqlEscapeString(id)} ;
         dct:title ${sparqlEscapeString(title)} ;
-        dct:created ${sparqlEscapeDateTime(new Date())} ;
+        ${descriptionLine}dct:created ${sparqlEscapeDateTime(new Date())} ;
         prov:generated ${sparqlEscapeUri(fileUri)} .
     }`);
 }

@@ -154,11 +154,12 @@ picks one of two modes.
   service checks the spec against its profile, and the LLM fixes what the
   check reports. The answer explains the spec in Dutch and holds it as a
   bijlage. Nothing runs.
-- **Execute.** No LLM runs. The service takes the last spec bijlage of the
-  conversation, checks it again and runs it as the user. It writes the CSV
-  to the share and records a `reporting:Report`. The answer is a fixed text
-  with the CSV and the spec. No spec, a spec that no longer checks out or a
-  failed run each give a fixed failure text.
+- **Execute.** One LLM call writes the report's `dct:description` from the
+  conversation, never from report data. The service takes the last spec
+  bijlage of the conversation, checks it again and runs it as the user. It
+  writes the CSV to the share and records a `reporting:Report`. The answer is
+  a fixed text with the CSV and the spec. No spec, a spec that no longer
+  checks out or a failed run each give a fixed failure text.
 
 A run finds the rows (the subjects of the spec's class that pass its
 filters), fetches each column for those rows, pairs the values and writes
@@ -226,7 +227,7 @@ read the conversation.
 | `sioc:Thread` | a conversation, made by the frontend |
 | `sioc:Post`, `sioct:InstantMessage` | a message: `sioc:content`, `foaf:maker`, `as:attachment` to its bijlagen |
 | `nfo:FileDataObject` | a bijlage; `dct:type` says spec or executed report |
-| `reporting:Report` | one per run; `prov:generated` points to the CSV |
+| `reporting:Report` | one per run; `dct:title`, a Dutch `dct:description` of at most 300 characters, and `prov:generated` to the CSV |
 
 The two bijlage types:
 

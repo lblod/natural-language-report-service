@@ -4,12 +4,14 @@
 // Refine: the LLM proposes a spec. The last spec that checked out goes on the
 // answer as a bijlage, not in the text.
 //
-// Execute: no LLM runs, so no LLM ever sees report data. The last spec
-// bijlage in the conversation is the agreed spec; it goes straight to the
-// runner. The answer is fixed text, also when the run fails: nothing is
-// retried and no spec is rewritten.
+// Execute: one LLM call writes the report's description from the
+// conversation, never from report data. The last spec bijlage in the
+// conversation is the agreed spec; it goes straight to the runner. The answer
+// is fixed text, also when the run fails: nothing is retried and no spec is
+// rewritten.
 import { uuid } from 'mu';
 import { ask } from './llm/loop.js';
+import { describeReport } from './llm/summary.js';
 import { parseSpec } from './runner/spec.js';
 import { checkSpec } from './runner/check.js';
 import { run } from './runner/run.js';
@@ -46,13 +48,17 @@ export async function executeSpec(history, conversationTitle, profiles) {
       return { text: TEXT.invalid };
     }
 
+    // The description comes from the conversation, before the run: no
+    // report data ever reaches the LLM.
+    const description = await describeReport(history, spec.title || conversationTitle);
+
     // The conversation's title (named by the first question) names the
     // file; the share name is unique, so a second run never overwrites the
     // first. The report itself keeps the dct:title of the spec.
     const shareName = `${uuid()}.csv`;
     writeShareFile(shareName, await run(spec, profiles.get(spec.profileUri)));
     const csvFile = await registerFile(shareName, 'text/csv', RESULT_TYPE, `${slug(conversationTitle)}.csv`);
-    await registerReport(spec.title, csvFile);
+    await registerReport(spec.title, csvFile, description);
 
     // Same physical spec file, registered as a bijlage for this message.
     const specFile = await registerFile(attachment.name, SPEC_MEDIA_TYPE, SPEC_TYPE);
