@@ -4,14 +4,12 @@
 // Refine: the LLM proposes a spec. The last spec that checked out goes on the
 // answer as a bijlage, not in the text.
 //
-// Execute: one LLM call writes the report's description from the
-// conversation, never from report data. The last spec bijlage in the
-// conversation is the agreed spec; it goes straight to the runner. The answer
-// is fixed text, also when the run fails: nothing is retried and no spec is
-// rewritten.
+// Execute: the last spec bijlage in the conversation is the agreed spec; it
+// goes straight to the runner. The answer is fixed text, also when the run
+// fails: nothing is retried and no spec is rewritten. The caller writes the
+// report's description right before the run, so execution holds no LLM call.
 import { uuid } from 'mu';
 import { ask } from './llm/loop.js';
-import { describeReport } from './llm/summary.js';
 import { parseSpec } from './runner/spec.js';
 import { checkSpec } from './runner/check.js';
 import { run } from './runner/run.js';
@@ -35,7 +33,10 @@ export async function refineSpec(turns, profiles) {
   return { text: text.trim(), attachments };
 }
 
-export async function executeSpec(history, conversationTitle, profiles) {
+// The agreed spec of the conversation, parsed and checked against its
+// profile. A failure is fixed text with no spec: only a spec the user saw
+// explained may run.
+export function prepareExecution(history, profiles) {
   const attachment = lastSpecAttachment(history);
   const content = attachment && readSpecFile(attachment.name);
   if (!content) return { text: TEXT.noSpec };
@@ -47,11 +48,18 @@ export async function executeSpec(history, conversationTitle, profiles) {
       console.error(`[reports] the agreed spec is not valid: ${error}`);
       return { text: TEXT.invalid };
     }
+    return { spec, attachment };
+  } catch (e) {
+    console.error('[reports] could not prepare the run:', e);
+    return { text: TEXT.failed };
+  }
+}
 
-    // The description comes from the conversation, before the run: no
-    // report data ever reaches the LLM.
-    const description = await describeReport(history, spec.title || conversationTitle);
-
+// Runs a prepared spec as the user and records its report. The description
+// comes from the caller, which writes it from the conversation right before
+// this call: execution never talks to the LLM and never sees report data.
+export async function executeSpec({ spec, attachment }, conversationTitle, profiles, description) {
+  try {
     // The conversation's title (named by the first question) names the
     // file; the share name is unique, so a second run never overwrites the
     // first. The report itself keeps the dct:title of the spec.

@@ -3,7 +3,8 @@ import bodyParser from 'body-parser';
 import { loadProfiles } from './src/runner/profile.js';
 import { readConversation, readHistory, writeMessage, deleteConversation } from './src/chat.js';
 import { wantsExecution } from './src/llm/mode.js';
-import { executeSpec, refineSpec } from './src/report-assistant.js';
+import { describeReport } from './src/llm/summary.js';
+import { prepareExecution, executeSpec, refineSpec } from './src/report-assistant.js';
 
 const PROFILE_DIR = process.env.PROFILE_DIR || '/config/profiles';
 // The agent that signs the assistant's messages, seeded by the portal's
@@ -45,9 +46,20 @@ app.post('/assistant/conversations/:id/turns', bodyParser.json(), async function
 
   try {
     const turns = [...history, { role: 'user', content }];
-    const answer = await wantsExecution(turns)
-      ? await executeSpec(history, conversation.title, profiles)
-      : await refineSpec(turns, profiles);
+    let answer;
+    if (await wantsExecution(turns)) {
+      const prepared = prepareExecution(history, profiles);
+      if (!prepared.spec) {
+        answer = prepared;
+      } else {
+        // The description is written from the conversation right before the
+        // run, outside the execution itself.
+        const description = await describeReport(history, prepared.spec.title || conversation.title);
+        answer = await executeSpec(prepared, conversation.title, profiles, description);
+      }
+    } else {
+      answer = await refineSpec(turns, profiles);
+    }
     await writeMessage({
       conversationUri: conversation.uri,
       content: answer.text,
