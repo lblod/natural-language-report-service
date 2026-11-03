@@ -211,7 +211,7 @@ export async function registerFile(shareName, format, type, name = shareName) {
         nfo:fileCreated ${now} ;
         nie:dataSource ${sparqlEscapeUri(logical)} ;
         dct:type ${sparqlEscapeUri(type)} .
-    }`);
+    }`, { scope: WRITE_SCOPE });
 
   return logical;
 }
