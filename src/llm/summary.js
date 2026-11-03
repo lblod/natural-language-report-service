@@ -27,8 +27,10 @@ export async function describeReport(turns, title) {
   return shorten(readFirstText(message)) || shorten(title);
 }
 
-// Reasoning models may leave `content` empty and put the visible text in a
-// separate field. Read the visible fields in order and take the first one.
+// Reasoning models may leave `content` empty, or not answer at all when the
+// thinking burned the token budget. Then take the first non-empty field of
+// reasoning_content, reasoning and thinking. Those may hold the model's
+// thinking rather than its answer.
 function readFirstText(message) {
   for (const key of ['content', 'reasoning_content', 'reasoning', 'thinking']) {
     const v = message?.[key];

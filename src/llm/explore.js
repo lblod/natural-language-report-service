@@ -16,13 +16,15 @@ const LOOKUP_LIMIT = 25;
 // they rarely change.
 const cache = new Map();
 
+// Every read of the LLM goes through here, under the service scope: public
+// data only, the same for every caller.
 function queryPublic(q) {
   return query(q, { scope: SERVICE_SCOPE });
 }
 
 // Up to INLINE_VALUES_MAX values [{ uri, label }] of a code list, cached for
-// VALUES_TTL. Empty when the read fails; the LLM then uses rep:anyOf with
-// words.
+// VALUES_TTL. Empty when the read fails, and that empty result is cached
+// too; the LLM then uses rep:anyOf with words.
 export async function fetchCodeList(type) {
   const hit = cache.get(type);
   if (hit && Date.now() - hit.at < VALUES_TTL) return hit.values;
@@ -68,7 +70,8 @@ export async function lookupValues(profile, field, term) {
   return lines.join('\n');
 }
 
-// Regex on str(?label), so language-tagged labels match.
+// The labels that contain the term, in one class, or in any class when type
+// is null. Regex on str(?label), so language-tagged labels match.
 async function queryLabels(term, type) {
   const q = `SELECT DISTINCT ?uri ?label WHERE {
     ?uri a ${type ? `<${type}>` : '?anyType'} ;
@@ -99,6 +102,8 @@ function resolveClass(profile, field) {
   return shape.targetClass;
 }
 
+// The term as plain text inside a regex: a "(" in a name must not break the
+// query.
 function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

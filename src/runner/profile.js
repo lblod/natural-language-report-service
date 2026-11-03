@@ -9,6 +9,8 @@ const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const OWL_ONTOLOGY = 'http://www.w3.org/2002/07/owl#Ontology';
 const REP = 'http://mu.semte.ch/vocabularies/reporting/';
 
+// Every .ttl file in dir, keyed by profile URI. Runs at boot: a broken or
+// missing profile stops the service, instead of failing later in a chat.
 export function loadProfiles(dir) {
   const files = readdirSync(dir).filter(f => f.endsWith('.ttl')).sort();
   const profiles = new Map();
@@ -22,6 +24,8 @@ export function loadProfiles(dir) {
   return profiles;
 }
 
+// One profile file. Its owl:Ontology names it; each sh:NodeShape is an
+// entity with its fields and discriminators.
 function loadProfile(file) {
   let store;
   try {
@@ -58,6 +62,8 @@ function readPath(store, node) {
   return inv ? { path: inv.value, inverse: true } : { path: null, inverse: false };
 }
 
+// One field of an entity: name, path, and what it holds: a datatype (a
+// value), a sh:class (a code list) or links to other entities.
 function parseField(store, p) {
   const one = (pred) => store.getQuads(p, pred, null)[0]?.object?.value || null;
   return {
@@ -119,10 +125,13 @@ export function findStartShape(profile, spec) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+// The entity with this URI, or null.
 export function findShape(profile, shapeUri) {
   return profile.shapes.find(s => s.uri === shapeUri) || null;
 }
 
+// The fields of an entity. None when the entity is unknown, so a walk ends
+// with a clear error instead of a crash.
 export function getFields(profile, shapeUri) {
   return findShape(profile, shapeUri)?.fields || [];
 }

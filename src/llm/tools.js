@@ -1,7 +1,8 @@
 // The tools the LLM calls, refinement only: describe_profile,
 // validate_spec, read_spec and lookup_values. Each returns
-// plain text for the model. No report is created, no spec is evaluated; the
-// database reads run under the service scope (public graph).
+// { content, spec }: content is the plain text for the model, spec is set
+// when the answer carries a spec. No report is created, no spec is
+// evaluated; the database reads run under the service scope (public graph).
 import { parseSpec } from '../runner/spec.js';
 import { checkSpec, buildWhereNotes, checkProfile } from '../runner/check.js';
 import { describeProfile } from './describe.js';
@@ -29,6 +30,8 @@ export const TOOLS = [
     }),
 ];
 
+// One tool definition in the OpenAI format. Every parameter is a required
+// string, which keeps TOOLS short.
 function defineTool(name, description, params) {
   const properties = {};
   for (const [key, text] of Object.entries(params)) {
@@ -44,37 +47,48 @@ function defineTool(name, description, params) {
   };
 }
 
+// Runs the tool the model asked for, by name. Returns { content, spec }, see
+// the top of this file.
 export async function runTool(name, args, profiles) {
   switch (name) {
-    case 'describe_profile': return handleDescribeProfile(args, profiles);
+    case 'describe_profile': return { content: await handleDescribeProfile(args, profiles) };
     case 'validate_spec': return handleValidateSpec(args, profiles);
     case 'read_spec': return handleReadSpec(args);
-    case 'lookup_values': return handleLookupValues(args, profiles);
-    default: return `unknown tool "${name}"`;
+    case 'lookup_values': return { content: await handleLookupValues(args, profiles) };
+    default: return { content: `unknown tool "${name}"` };
   }
 }
 
+// describe_profile: the menu of one profile. The system prompt only holds
+// the menu of the current spec's profile; this gives the model any other.
 async function handleDescribeProfile({ profile_id }, profiles) {
   return checkProfile(profiles, profile_id) || describeProfile(profiles.get(profile_id));
 }
 
+// validate_spec: parse and check a spec. The model gets "ok" plus where
+// each rep:where applies, or one error sentence it can act on. An accepted
+// spec also comes back as spec: this check is the only way into a bijlage.
 function handleValidateSpec({ spec }, profiles) {
   let parsed;
   try {
     parsed = parseSpec(spec);
   } catch (e) {
-    return `the spec did not parse: ${e.message}`;
+    return { content: `the spec did not parse: ${e.message}` };
   }
   const error = checkSpec(parsed, profiles);
-  if (error) return error;
-  return ['ok', ...buildWhereNotes(parsed, profiles.get(parsed.profileUri))].join('\n');
+  if (error) return { content: error };
+  return { content: ['ok', ...buildWhereNotes(parsed, profiles.get(parsed.profileUri))].join('\n'), spec };
 }
 
-// Only spec files this service made are readable.
+// read_spec: the Turtle of an older spec bijlage, so the user can go back
+// to it. Only spec files this service made are readable.
 function handleReadSpec({ file_name }) {
-  return readSpecFile(file_name) || 'no such spec file.';
+  const turtle = readSpecFile(file_name);
+  return turtle ? { content: turtle, spec: turtle } : { content: 'no such spec file.' };
 }
 
+// lookup_values: code-list values that match a term, so a filter names
+// real URIs instead of guesses.
 async function handleLookupValues({ profile_id, field, term }, profiles) {
   const error = checkProfile(profiles, profile_id);
   if (error) return error;

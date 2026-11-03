@@ -38,10 +38,10 @@ export async function wantsExecution(turns) {
   return stripMarkdown(readFirstText(message)).trim().toLowerCase().startsWith('true');
 }
 
-// Reasoning models may leave `content` empty and put the visible text in a
-// separate field (reasoning_content / thinking / reasoning), or may not
-// answer at all when the thinking burned the token budget. Read the visible
-// fields in order and take the first non-empty one.
+// Reasoning models may leave `content` empty, or not answer at all when the
+// thinking burned the token budget. Then take the first non-empty field of
+// reasoning_content, reasoning and thinking. Those may hold the model's
+// thinking rather than its answer.
 function readFirstText(message) {
   for (const key of ['content', 'reasoning_content', 'reasoning', 'thinking']) {
     const v = message?.[key];
@@ -50,6 +50,7 @@ function readFirstText(message) {
   return '';
 }
 
+// Markdown marks out, so "**true**" still reads as true.
 function stripMarkdown(s) {
   return String(s).replace(/[*_`>#]/g, ' ');
 }

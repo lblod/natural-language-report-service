@@ -3,6 +3,9 @@
 // search the short ones.
 import { fetchCodeList, INLINE_VALUES_MAX } from './explore.js';
 
+// The menu: how a spec looks, then per entity each field and its type: a
+// datatype, a code list (with its values when short) or a link to another
+// entity. The model can only write paths that exist; this is its map.
 export async function describeProfile(profile) {
   const lines = [`A spec is Turtle, in exactly this shape (copy these prefixes):
 @prefix rep:  <http://mu.semte.ch/vocabularies/reporting/> .
@@ -43,6 +46,8 @@ A date filter is sh:minInclusive or sh:maxInclusive with "yyyy-mm-dd"^^xsd:dateT
   return lines.join('\n');
 }
 
+// A code-list field: the list's name and, when the list is short, its
+// values, so the model needs no lookup.
 function formatConceptLabel(type, values) {
   if (!values.length) return shortenUri(type);
   const names = values.map(v => v.label).join(', ');
@@ -50,15 +55,20 @@ function formatConceptLabel(type, values) {
   return `${shortenUri(type)} — ${values.length} waarden: ${names}${more}`;
 }
 
+// A link to another entity: its name plus "(veel)", many. Unlike a short
+// code list, its values are not listed in the menu.
 function formatLinkedLabel(profile, nodeUri) {
   const s = profile.shapes.find(x => x.uri === nodeUri);
   return s ? `${s.label || s.targetClass} (veel)` : shortenUri(nodeUri);
 }
 
+// The local name of a datatype, "...#dateTime" becomes "dateTime", to keep
+// the menu short.
 function formatDatatype(dt) {
   return dt.split('#').pop();
 }
 
+// A URI without its host, at most 60 characters, to keep the menu short.
 function shortenUri(uri) {
   return uri.replace(/^https?:\/\/[^/]+\//, '…/').slice(-60);
 }

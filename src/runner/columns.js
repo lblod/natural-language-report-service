@@ -9,7 +9,8 @@ import { buildHopsPattern, buildWherePatterns } from './seed.js';
 const SUBJECT_CHUNK_SIZE = Math.max(1, Number(process.env.SUBJECT_CHUNK_SIZE) || 100);
 
 // Returns subject → column index → [chain], a chain being the terms on the
-// path, one per step, the value last.
+// path, one per step, the value last. One query per group of columns per
+// SUBJECT_CHUNK_SIZE subjects keeps each query small.
 export async function fetchColumns(subjects, spec) {
   const values = new Map();
   const groups = groupColumns(spec.columns);
@@ -23,6 +24,8 @@ export async function fetchColumns(subjects, spec) {
   return values;
 }
 
+// Columns with the same path and the same rep:where share one query, and in
+// assemble.js they share their nodes. rep:self needs no query.
 function groupColumns(columns) {
   const groups = new Map();
   columns.forEach((col, index) => {
@@ -38,6 +41,8 @@ function groupColumns(columns) {
   return [...groups.values()];
 }
 
+// The SPARQL of one group for a chunk of subjects. It returns every node on
+// the path, not only the value: assemble.js pairs columns by those nodes.
 function buildGroupQuery(group, chunk) {
   const subjects = chunk.map(sparqlEscapeUri).join(' ');
   // every hop except the last gets its own variable; the leaf is ?v
@@ -50,6 +55,8 @@ function buildGroupQuery(group, chunk) {
   return `SELECT DISTINCT ${vars.join(' ')} WHERE {\n  VALUES ?s { ${subjects} }\n  ${lines.join('\n  ')}\n}`;
 }
 
+// Adds one query result to values: per subject, per column of the group,
+// the chain of terms found.
 function collect(result, group, values) {
   for (const b of result.results.bindings) {
     const chain = [...group.hops.slice(1).map((hop, i) => b[`x_${i + 1}`]), b.v];

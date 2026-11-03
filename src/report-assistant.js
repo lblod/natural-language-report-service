@@ -24,8 +24,10 @@ const TEXT = {
   noAnswer: 'Er kwam geen antwoord. Probeer het opnieuw.',
 };
 
-// An empty answer (a reasoning model can end with no text) gets a fixed
-// text and no spec: only a spec the user saw explained may run.
+// One refine turn: the LLM answers, and the spec it validated is stored and
+// attached to that answer as a bijlage. An empty answer (a reasoning model
+// can end with no text) gets a fixed text and no spec: only a spec the user
+// saw explained may run.
 export async function refineSpec(turns, profiles) {
   const { text, spec } = await ask(turns, profiles);
   if (!text.trim()) return { text: TEXT.noAnswer };
@@ -78,11 +80,15 @@ export async function executeSpec({ spec, attachment }, conversation, profiles, 
   }
 }
 
+// The newest spec bijlage in the history, or null. The agreed spec is the
+// last one the user saw.
 function findLastSpecAttachment(history) {
   return history.flatMap(message => message.attachments)
     .filter(a => a.mediaType === SPEC_MEDIA_TYPE).at(-1) || null;
 }
 
+// A file name from the conversation title, so the CSV downloads under a
+// readable name. Falls back to "report".
 function slugify(title) {
   return (title || 'report').toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')

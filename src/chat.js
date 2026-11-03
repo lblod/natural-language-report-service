@@ -43,7 +43,9 @@ const PREFIXES = `
   PREFIX prov: <http://www.w3.org/ns/prov#>
 `;
 
-// The conversation with this uuid, or null when the caller may not read it.
+// The conversation with this uuid, or null when it does not exist or the
+// caller may not read it. This read is the access check: the caller's
+// session decides what is readable.
 export async function readConversation(id) {
   const result = await query(`${PREFIXES}
     SELECT ?conversation ?title ?creator WHERE {
@@ -59,7 +61,9 @@ export async function readConversation(id) {
 
 // The last HISTORY_LIMIT messages, oldest first, as
 // { role, content, attachments: [{ uri, name, mediaType, type }] }.
-// A message comes back once per bijlage, hence the wider LIMIT.
+// A message comes back once per bijlage, hence the wider LIMIT. The model
+// needs the conversation so far; the assistant's messages are told apart by
+// its agent URI.
 export async function readHistory(conversationUri, assistantUri) {
   const result = await query(`${PREFIXES}
     SELECT ?message ?content ?maker ?created ?doc ?docName ?docFormat ?docType WHERE {
@@ -132,9 +136,10 @@ export async function writeMessage({ conversationUri, content, maker, attachment
   return id;
 }
 
-// The report of one run, pointing at the logical file of its CSV. The
-// description is the short Dutch text written from the conversation. The
-// report conforms to a ReportSpec that carries the same metadata.
+// The report of one run, pointing at the logical file of its CSV, so it
+// shows up in the reports list. The description is the short Dutch text
+// written from the conversation. The report conforms to a ReportSpec that
+// carries the same metadata and the conversation it came from.
 export async function registerReport(title, fileUri, description, conversationUri) {
   const id = uuid();
   const specId = uuid();
@@ -164,6 +169,8 @@ export async function registerReport(title, fileUri, description, conversationUr
     }`, { scope: WRITE_SCOPE });
 }
 
+// Writes a file to the share folder, where the file service serves it
+// from.
 export function writeShareFile(fileName, content) {
   writeFileSync(`${SHARE_DIR}/${fileName}`, content, 'utf8');
 }
@@ -178,6 +185,8 @@ export async function storeSpecFile(spec) {
 }
 
 // The Turtle of a spec bijlage, or null when there is no such spec file.
+// Only spec file names pass (SPEC_FILE_NAME): read_spec lets the model name
+// the file, and it must never open a CSV.
 export function readSpecFile(fileName) {
   if (!SPEC_FILE_NAME.test(fileName || '')) return null;
   try {
@@ -189,8 +198,8 @@ export function readSpecFile(fileName) {
 
 // One logical file called `name` over the physical share file `shareName`,
 // both nfo:FileDataObject with the bijlage type as dct:type. Returns the
-// logical file uri. A share name must be unique: two files on one share name
-// overwrite each other.
+// logical file uri. That is the shape the file service expects. A share
+// name must be unique: two files on one share name overwrite each other.
 export async function registerFile(shareName, format, type, name = shareName) {
   const id = uuid();
   const logical = `${FILE_BASE}${id}`;

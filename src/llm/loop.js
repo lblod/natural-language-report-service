@@ -93,8 +93,11 @@ what it says, up to three rounds. Then propose and stop.
 Reply to the user in Dutch. Earlier turns are context only. Answer the last one.`;
 
 // One refine turn. turns is the conversation so far, [{ role, content,
-// attachments }], newest last. Returns the answer text and the last spec
-// validate_spec accepted in this turn, or null.
+// attachments }], newest last. Sends it to the model and runs the tools the
+// model asks for, until it answers in text or MAX_ROUNDS runs out. The model
+// may only propose a spec it validated, hence the tool rounds. Returns the
+// answer text and the last spec validate_spec accepted in this turn, or
+// null.
 export async function ask(turns, profiles) {
   const current = findCurrentSpec(turns);
   const messages = [{ role: 'system', content: await buildSystemPrompt(current, profiles) },
@@ -114,19 +117,19 @@ export async function ask(turns, profiles) {
       try {
         result = await runTool(call.function.name, args, profiles);
       } catch (e) {
-        result = `tool failed: ${String(e.message || e).split('\n')[0]}`;
+        result = { content: `tool failed: ${String(e.message || e).split('\n')[0]}` };
       }
-      // validate_spec answers "ok" (plus notes) when the spec checks out;
-      // that spec becomes the bijlage of the answer.
+      // validate_spec hands back the spec when it checks out; that spec
+      // becomes the bijlage of the answer.
       // One answer carries one spec: say so when this one replaces another.
-      if (call.function.name === 'validate_spec' && /^ok(\n|$)/.test(result)) {
-        if (spec && spec !== args.spec) {
-          result += '\nThis spec replaces the one you validated before. Your answer carries only this one.';
+      if (call.function.name === 'validate_spec' && result.spec) {
+        if (spec && spec !== result.spec) {
+          result.content += '\nThis spec replaces the one you validated before. Your answer carries only this one.';
         }
-        spec = args.spec;
+        spec = result.spec;
       }
-      const reply = { role: 'tool', tool_call_id: call.id, content: result };
-      if (call.function.name === 'read_spec' && result.includes('ReportSpec')) reply.leftOut = { content: LEFT_OUT };
+      const reply = { role: 'tool', tool_call_id: call.id, content: result.content };
+      if (call.function.name === 'read_spec' && result.spec) reply.leftOut = { content: LEFT_OUT };
       messages.push(reply);
     }
   }
@@ -145,11 +148,14 @@ function addSpecHint(turn) {
   return { ...turn, content: `${content}\n\n${hints.join('\n\n')}` };
 }
 
+// A code block that holds a spec becomes "(spec left out)": the spec lives
+// in its bijlage, and the history should not carry a second copy.
 function cutSpecText(text) {
   return text.replace(/```[\s\S]*?```/g, block => (block.includes('ReportSpec') ? '(spec left out)' : block));
 }
 
 // The current spec: the last spec bijlage in the conversation, or null.
+// Refine changes this spec, so the model gets it in full.
 function findCurrentSpec(turns) {
   const name = turns.flatMap(t => t.attachments || [])
     .filter(a => a.mediaType === SPEC_MEDIA_TYPE).at(-1)?.name;
@@ -173,10 +179,13 @@ async function buildSystemPrompt(current, profiles) {
   return parts.join('\n\n');
 }
 
+// One line per profile, its title and URI, for the system prompt.
 function listProfiles(profiles) {
   return [...profiles.values()].map(p => `${p.title}  <${p.uri}>`).join('\n');
 }
 
+// The rep:profile of a spec, or null when the Turtle does not parse. It
+// picks the menu for the system prompt.
 function readProfileUri(turtle) {
   try {
     return parseSpec(turtle).profileUri;
@@ -186,7 +195,8 @@ function readProfileUri(turtle) {
 }
 
 // The current spec goes in full under the user's new message: the one spec
-// the history holds as text.
+// the history holds as text, so the model needs no read_spec for it. Its
+// short form in leftOut is sent once a newer spec follows.
 function addCurrentSpec(messages, current) {
   if (!current) return messages;
   const { name, turtle } = current;
@@ -205,13 +215,16 @@ function leaveOutOlderSpecs(messages) {
   return messages.map((m, i) => (m.leftOut && i !== newest ? { ...m, ...m.leftOut } : m));
 }
 
+// The short form of a model message that called validate_spec: the spec
+// argument becomes LEFT_OUT, every other call stays. ask() stores it as
+// leftOut; it is sent once a newer spec follows (leaveOutOlderSpecs).
 function leaveOutSpec(call) {
   if (call.function.name !== 'validate_spec') return call;
   return { ...call, function: { ...call.function, arguments: JSON.stringify({ spec: LEFT_OUT }) } };
 }
 
 // The one place that talks to the provider. Without tools it is a plain
-// completion (the mode check).
+// completion (the mode check and the report description).
 export async function callLlm(messages, tools = null) {
   // Send only the fields every provider accepts back. Attachments never go
   // out.
@@ -286,6 +299,9 @@ async function pause(attempt, retryAfter, reason) {
   await new Promise(resolve => setTimeout(resolve, wait));
 }
 
+// The model's tool arguments, from JSON text. Broken JSON gives {}: the
+// tool then answers with an error the model can fix, instead of failing the
+// turn.
 function parseArgs(s) {
   if (!s) return {};
   try { return JSON.parse(s); } catch { return {}; }

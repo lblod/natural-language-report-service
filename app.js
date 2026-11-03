@@ -17,7 +17,8 @@ const FAILED = 'Er ging iets mis. Probeer het opnieuw.';
 const profiles = loadProfiles(PROFILE_DIR);
 
 // One chat turn. Records the question, answers 202, then writes the
-// assistant's answer; the frontend polls the conversation for it. mu's
+// assistant's answer; the frontend polls the conversation for it. A turn
+// takes several LLM calls, too long to keep the request open. mu's
 // query/update run as the caller for the whole turn, also after the 202.
 // The template only parses application/vnd.api+json, the chat sends
 // application/json.

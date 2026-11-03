@@ -6,6 +6,9 @@ import { countSharedSteps } from './spec.js';
 const ROW_LIMIT = Number(process.env.ROW_LIMIT || 200000);
 const PAGE_SIZE = Number(process.env.SEED_PAGE_SIZE || 5000);
 
+// The subjects of the report (what the rows are about) that match the
+// class, the discriminators and the filters, PAGE_SIZE at a time. More than
+// ROW_LIMIT means the question is too broad: fail with a hint to filter.
 export async function fetchSubjects(spec, shape) {
   const subjects = [];
   let offset = 0;
@@ -22,7 +25,9 @@ export async function fetchSubjects(spec, shape) {
   return subjects;
 }
 
-// The validator made sure spec.targetClass is the class of shape.
+// One page of subjects: the class, the shape's discriminators and the
+// spec's filters in one SELECT. The validator made sure spec.targetClass is
+// the class of shape.
 function buildSeedPageQuery(spec, shape, limit, offset) {
   const parts = [`?s a ${sparqlEscapeUri(spec.targetClass)} .`];
   shape.discriminators.forEach((d, di) => {
@@ -45,6 +50,8 @@ function buildDiscriminatorPattern(d, varPrefix) {
   return `FILTER(${buildDiscriminatorTest(d, varPrefix)})`;
 }
 
+// A discriminator as a test inside FILTER(): and/or/not combine EXISTS
+// tests; sh:maxCount 0 becomes NOT EXISTS.
 function buildDiscriminatorTest(d, varPrefix) {
   if (d.and) return `(${d.and.map((x, i) => buildDiscriminatorTest(x, `${varPrefix}_${i}`)).join(' && ')})`;
   if (d.or) return `(${d.or.map((x, i) => buildDiscriminatorTest(x, `${varPrefix}_${i}`)).join(' || ')})`;
@@ -54,7 +61,8 @@ function buildDiscriminatorTest(d, varPrefix) {
   return `EXISTS { ${buildFilterPattern(d, varPrefix)} }`;
 }
 
-// Writes out every hop as its own triple pattern.
+// Writes out every hop as its own triple pattern, one variable per node.
+// The subjects query and the column queries both use it.
 // Forward:  ?s <p1> ?f0_1 . ?f0_1 <p2> ?f0_v
 // Inverse:  ?s ^<p1> → ?f0_1 <p1> ?s
 export function buildHopsPattern(hops, varPrefix, startVar, lastVar = `?${varPrefix}_v`) {
@@ -133,6 +141,8 @@ function buildConditionPattern(c, varPrefix, hops, startVar) {
   return parts.join('\n  ');
 }
 
+// A spec value as SPARQL: a URI, a date, a dateTime, an integer or a
+// boolean. Any other datatype becomes a plain string.
 function escapeTerm(t) {
   if (t.type === 'uri') return sparqlEscapeUri(t.value);
   if (t.datatype === 'http://www.w3.org/2001/XMLSchema#dateTime')
@@ -146,6 +156,8 @@ function escapeTerm(t) {
   return sparqlEscapeString(t.value);
 }
 
+// A rep:anyOf word as plain text inside the regex: a "." or "(" in a word
+// must not act as regex syntax.
 function escapeRegexTerm(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

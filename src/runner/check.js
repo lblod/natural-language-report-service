@@ -17,7 +17,8 @@ const MAX_PATH_DEPTH = Number(process.env.MAX_PATH_DEPTH || 8);
 const ANYOF_MAX_TERMS = 24;
 const ANYOF_MAX_TERM_LENGTH = 100;
 
-// null when the profile exists, else what to write instead.
+// null when the profile exists, else what to write instead. Runs before
+// every other check: they all need the profile.
 export function checkProfile(profiles, uri) {
   if (profiles.has(uri)) return null;
   return `no profile <${uri}>. Available: ${[...profiles.values()].map(p => p.title).join(', ')}.`;
@@ -49,6 +50,7 @@ function checkStartEntity(spec, profile) {
   return `<${spec.targetClass}> is the class of ${matches.length} entities: ${names}. Add rep:entity <...> to say which one.`;
 }
 
+// The entity names of a profile, for error messages.
 function listShapes(profile) {
   return profile.shapes.map(s => s.label || s.targetClass).join(', ');
 }
@@ -69,11 +71,13 @@ function collectConditions(spec) {
   return out;
 }
 
+// A spec without columns would give an empty report.
 function checkColumnsPresent(spec) {
   if (!spec.columns.length) return 'no columns. Add at least one rep:columns entry.';
   return null;
 }
 
+// Every column needs an rdfs:label: it is the CSV header.
 function checkColumnLabel(spec) {
   for (const col of spec.columns) {
     if (!col.label) return 'a column has no rdfs:label.';
@@ -81,6 +85,7 @@ function checkColumnLabel(spec) {
   return null;
 }
 
+// Column labels must differ: two equal headers make the CSV unreadable.
 function checkColumnLabelsUnique(spec) {
   const seen = new Set();
   for (const col of spec.columns) {
@@ -92,7 +97,8 @@ function checkColumnLabelsUnique(spec) {
   return null;
 }
 
-// Every path resolves, columns end on a value, depth capped
+// Every path resolves, columns end on a value, depth capped. Otherwise the
+// query finds nothing, or a column shows links where values were meant.
 function checkPathsResolve(spec, profile) {
   const startShapeUri = findStartShape(profile, spec).uri;
   for (const col of spec.columns) {
@@ -108,7 +114,8 @@ function checkPathsResolve(spec, profile) {
   return null;
 }
 
-// sh:min/sh:max only on numbers and dates
+// sh:min/sh:max only on numbers and dates: pickExtreme compares those; on
+// text it would just pick by alphabet.
 function checkCollectMinMaxTyped(spec, profile) {
   const startShapeUri = findStartShape(profile, spec).uri;
   for (const col of spec.columns) {
@@ -126,6 +133,9 @@ function checkCollectMinMaxTyped(spec, profile) {
   return null;
 }
 
+// At most one column may say rep:row. A rule from the first assembler, in
+// which only one column could spread a subject over several rows. rep:row
+// now works like no rep:collect at all.
 function checkOneRowColumn(spec) {
   const rowCols = spec.columns.filter(c => c.collect === REP + 'row');
   if (rowCols.length > 1) {
@@ -135,7 +145,8 @@ function checkOneRowColumn(spec) {
   return null;
 }
 
-// Columns carry no constraints; known collect mode
+// Columns carry no constraints; known collect mode. A condition belongs in
+// sh:property or rep:where, and an unknown mode would be silently ignored.
 function checkColumnPure(spec) {
   for (const col of spec.columns) {
     if (Object.keys(col.constraints || {}).length) {
@@ -152,7 +163,8 @@ function checkColumnPure(spec) {
   return null;
 }
 
-// No label inside a filter or rep:where
+// No label inside a filter or rep:where: a label shows nothing there; it
+// belongs on a column.
 function checkFilterLabel(spec) {
   for (const { what, cond } of collectConditions(spec)) {
     if ((cond.constraints || {}).label) {
@@ -192,6 +204,8 @@ function checkCountLimits(spec) {
   return null;
 }
 
+// rep:anyOf becomes one regex over the words. A limited number of short,
+// plain words keeps it small; a URI is no word.
 function checkAnyOfLimits(spec) {
   for (const { cond } of collectConditions(spec)) {
     const c = cond.constraints;
@@ -211,7 +225,8 @@ function checkAnyOfLimits(spec) {
   return null;
 }
 
-// sh:in must not mix URIs and literals
+// sh:in must not mix URIs and literals: a value is one or the other, so
+// part of the list could never match.
 function checkInHomogeneous(spec) {
   for (const { cond } of collectConditions(spec)) {
     const c = cond.constraints;
@@ -224,6 +239,8 @@ function checkInHomogeneous(spec) {
   return null;
 }
 
+// Date and dateTime values must parse. A bad one would only fail at run
+// time, when escapeTerm turns it into a SPARQL date.
 function checkLiteralsParse(spec) {
   const constraintTerms = [];
   for (const { cond } of collectConditions(spec)) {
@@ -318,10 +335,13 @@ function getNodeName(profile, startShapeUri, hops) {
   return [...new Set(ends.flatMap(f => f.nodes))].map(uri => getShapeName(profile, uri)).join(' or ');
 }
 
+// An entity's label in quotes, for error messages.
 function getShapeName(profile, shapeUri) {
   return `"${profile.shapes.find(s => s.uri === shapeUri)?.label || shapeUri}"`;
 }
 
+// True when value is a valid date. A dateTime must also have a time (a
+// "T"); a date must be exactly yyyy-mm-dd.
 function parsesAsDate(value, withTime) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return false;
@@ -381,6 +401,10 @@ function findEndFields(profile, startShapeUri, hops) {
   return findHopFields(profile, shapeUris, hops[hops.length - 1]);
 }
 
+// Walks a path through the profile step by step and returns the first
+// problem, or null: too many steps, a step the entity does not have, a step
+// past a value, or a column that ends on a link (or on a value while it asks
+// for a URI with sh:nodeKind sh:IRI). Every path check here uses it.
 function checkPath(profile, startShapeUri, hops, what, isColumn, wantsIri = false) {
   if (hops.length > MAX_PATH_DEPTH) {
     return `${what} walks ${hops.length} hops. The limit is ${MAX_PATH_DEPTH}.`;

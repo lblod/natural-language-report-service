@@ -108,6 +108,8 @@ function fold(branch, nodes, tree, columns) {
   return cells;
 }
 
+// The values at the end of a column's remaining steps under one node: what
+// fold() puts in one cell.
 function collectTermsBelow(node, rest) {
   if (!rest.length) return [node.term];
   const byValue = node.below.get(rest[0]);

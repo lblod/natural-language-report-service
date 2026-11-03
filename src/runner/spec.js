@@ -1,13 +1,17 @@
 import N3 from 'n3';
 
 // Parse a spec (rep:ReportSpec + sh:NodeShape) into a plain object.
-// No validation here; that is check.js.
+// No checks against the profile here; that is check.js. Only Turtle that
+// cannot become one plain spec is refused.
 
 const SH = 'http://www.w3.org/ns/shacl#';
 const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const REP = 'http://mu.semte.ch/vocabularies/reporting/';
 const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
 
+// One spec: title, profile, start class or entity, filters and columns.
+// Refuses Turtle with no rep:ReportSpec or with two: one answer is one
+// report.
 export function parseSpec(turtle) {
   const parser = new N3.Parser();
   const quads = parser.parse(turtle);
@@ -36,6 +40,9 @@ export function parseSpec(turtle) {
   return { uri: specNode.value, title, profileUri, targetClass, entity, filters, columns };
 }
 
+// One filter: its path, its constraints and its rep:where conditions.
+// Profile discriminators are written the same way, so profile.js uses this
+// too.
 export function parseFilter(store, p) {
   let path = [];
   const pathQuad = store.getQuads(p, SH + 'path', null)[0]?.object;
@@ -63,6 +70,9 @@ export function countSharedSteps(a, b) {
   return k;
 }
 
+// One column: its path (rep:self is the row's own subject), header label,
+// collect mode, separator and nodeKind. Constraints are read too, only so
+// check.js can refuse them.
 function parseColumn(store, col) {
   let path = [];
   const pathQuad = store.getQuads(col, SH + 'path', null)[0]?.object;
@@ -86,7 +96,8 @@ function parseColumn(store, col) {
 }
 
 // A path is a single node (predicate, or a blank with sh:inversePath)
-// or an RDF list of predicates. Returns Hop[] = { predicate, inverse }.
+// or an RDF list of steps, each a predicate or [ sh:inversePath <p> ].
+// Returns Hop[] = { predicate, inverse }.
 function parsePath(store, pathQuad) {
   if (pathQuad.termType === 'BlankNode') {
     const inv = store.getQuads(pathQuad, SH + 'inversePath', null)[0]?.object;
@@ -106,6 +117,8 @@ function parsePath(store, pathQuad) {
   });
 }
 
+// The conditions on a filter, column or rep:where as plain values: the
+// counts, sh:hasValue, sh:in, the ranges, sh:pattern and rep:anyOf.
 function readConstraints(store, p, { withLabel = false } = {}) {
   const one = (pred) => store.getQuads(p, pred, null)[0]?.object || null;
   const constraints = {};
@@ -139,6 +152,8 @@ function readConstraints(store, p, { withLabel = false } = {}) {
   return constraints;
 }
 
+// The items of an RDF list, in order. A list item without rdf:first is
+// broken Turtle: refuse it rather than drop items.
 export function readRdfList(store, node) {
   const items = [];
   let cur = node;
@@ -151,6 +166,8 @@ export function readRdfList(store, node) {
   return items;
 }
 
+// An N3 term as a plain { type, value, datatype, language }, the shape the
+// query builders and check.js work on.
 function toTerm(object) {
   if (object.termType === 'NamedNode') return { type: 'uri', value: object.value };
   return {
