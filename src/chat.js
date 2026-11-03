@@ -135,7 +135,7 @@ export async function writeMessage({ conversationUri, content, maker, attachment
 // The report of one run, pointing at the logical file of its CSV. The
 // description is the short Dutch text written from the conversation. The
 // report conforms to a ReportSpec that carries the same metadata.
-export async function registerReport(title, fileUri, description) {
+export async function registerReport(title, fileUri, description, conversationUri) {
   const id = uuid();
   const specId = uuid();
   const now = new Date();
@@ -143,6 +143,9 @@ export async function registerReport(title, fileUri, description) {
   const spec = sparqlEscapeUri(`${REPORT_BASE}${specId}`);
   const descriptionLine = description
     ? `dct:description ${sparqlEscapeString(description)} ;\n        `
+    : '';
+  const conversationLine = conversationUri
+    ? `dct:isPartOf ${sparqlEscapeUri(conversationUri)} ;\n        `
     : '';
   await update(`${PREFIXES}
     INSERT DATA {
@@ -157,7 +160,7 @@ export async function registerReport(title, fileUri, description) {
         mu:uuid ${sparqlEscapeString(specId)} ;
         dct:title ${sparqlEscapeString(title)} ;
         ${descriptionLine}dct:created ${sparqlEscapeDateTime(now)} ;
-        prov:generated ${sparqlEscapeUri(fileUri)} .
+        ${conversationLine}prov:generated ${sparqlEscapeUri(fileUri)} .
     }`, { scope: WRITE_SCOPE });
 }
 

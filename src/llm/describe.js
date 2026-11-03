@@ -1,7 +1,7 @@
 // A profile as a plain text menu: entities, fields, code lists. Code lists up
 // to INLINE_VALUES_MAX are inlined (and cached), so the LLM never has to
 // search the short ones.
-import { codeList, INLINE_VALUES_MAX } from './explore.js';
+import { fetchCodeList, INLINE_VALUES_MAX } from './explore.js';
 
 export async function describeProfile(profile) {
   const lines = [`A spec is Turtle, in exactly this shape (copy these prefixes):
@@ -30,9 +30,9 @@ A date filter is sh:minInclusive or sh:maxInclusive with "yyyy-mm-dd"^^xsd:dateT
   for (const shape of profile.shapes) {
     lines.push(`${shape.label || shape.targetClass} — sh:targetClass <${shape.targetClass}> ; rep:entity <${shape.uri}>`);
     for (const f of shape.fields) {
-      const kind = f.datatype ? datatypeName(f.datatype)
-        : f.class ? `→ ${conceptLabel(f.class, await codeList(f.class))}`
-        : f.nodes.length ? `→ ${f.nodes.map(n => linkedLabel(profile, n)).join(' or ')}`
+      const kind = f.datatype ? formatDatatype(f.datatype)
+        : f.class ? `→ ${formatConceptLabel(f.class, await fetchCodeList(f.class))}`
+        : f.nodes.length ? `→ ${f.nodes.map(n => formatLinkedLabel(profile, n)).join(' or ')}`
         : '?';
       const dir = f.inverse ? ' (inverse)' : '';
       const pathShown = f.path || '?';
@@ -43,22 +43,22 @@ A date filter is sh:minInclusive or sh:maxInclusive with "yyyy-mm-dd"^^xsd:dateT
   return lines.join('\n');
 }
 
-function conceptLabel(type, values) {
-  if (!values.length) return short(type);
+function formatConceptLabel(type, values) {
+  if (!values.length) return shortenUri(type);
   const names = values.map(v => v.label).join(', ');
   const more = values.length >= INLINE_VALUES_MAX ? ', …' : '';
-  return `${short(type)} — ${values.length} waarden: ${names}${more}`;
+  return `${shortenUri(type)} — ${values.length} waarden: ${names}${more}`;
 }
 
-function linkedLabel(profile, nodeUri) {
+function formatLinkedLabel(profile, nodeUri) {
   const s = profile.shapes.find(x => x.uri === nodeUri);
-  return s ? `${s.label || s.targetClass} (veel)` : short(nodeUri);
+  return s ? `${s.label || s.targetClass} (veel)` : shortenUri(nodeUri);
 }
 
-function datatypeName(dt) {
+function formatDatatype(dt) {
   return dt.split('#').pop();
 }
 
-function short(uri) {
+function shortenUri(uri) {
   return uri.replace(/^https?:\/\/[^/]+\//, '…/').slice(-60);
 }

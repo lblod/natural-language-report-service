@@ -12,7 +12,7 @@ import { uuid } from 'mu';
 import { ask } from './llm/loop.js';
 import { parseSpec } from './runner/spec.js';
 import { checkSpec } from './runner/check.js';
-import { run } from './runner/run.js';
+import { runReport } from './runner/run.js';
 import { storeSpecFile, readSpecFile, writeShareFile, registerFile, registerReport,
          SPEC_MEDIA_TYPE, SPEC_TYPE, RESULT_TYPE } from './chat.js';
 
@@ -37,7 +37,7 @@ export async function refineSpec(turns, profiles) {
 // profile. A failure is fixed text with no spec: only a spec the user saw
 // explained may run.
 export function prepareExecution(history, profiles) {
-  const attachment = lastSpecAttachment(history);
+  const attachment = findLastSpecAttachment(history);
   const content = attachment && readSpecFile(attachment.name);
   if (!content) return { text: TEXT.noSpec };
 
@@ -58,15 +58,15 @@ export function prepareExecution(history, profiles) {
 // Runs a prepared spec as the user and records its report. The description
 // comes from the caller, which writes it from the conversation right before
 // this call: execution never talks to the LLM and never sees report data.
-export async function executeSpec({ spec, attachment }, conversationTitle, profiles, description) {
+export async function executeSpec({ spec, attachment }, conversation, profiles, description) {
   try {
     // The conversation's title (named by the first question) names the
     // file; the share name is unique, so a second run never overwrites the
     // first. The report itself keeps the dct:title of the spec.
     const shareName = `${uuid()}.csv`;
-    writeShareFile(shareName, await run(spec, profiles.get(spec.profileUri)));
-    const csvFile = await registerFile(shareName, 'text/csv', RESULT_TYPE, `${slug(conversationTitle)}.csv`);
-    await registerReport(spec.title, csvFile, description);
+    writeShareFile(shareName, await runReport(spec, profiles.get(spec.profileUri)));
+    const csvFile = await registerFile(shareName, 'text/csv', RESULT_TYPE, `${slugify(conversation.title)}.csv`);
+    await registerReport(spec.title, csvFile, description, conversation.uri);
 
     // Same physical spec file, registered as a bijlage for this message.
     const specFile = await registerFile(attachment.name, SPEC_MEDIA_TYPE, SPEC_TYPE);
@@ -78,12 +78,12 @@ export async function executeSpec({ spec, attachment }, conversationTitle, profi
   }
 }
 
-function lastSpecAttachment(history) {
+function findLastSpecAttachment(history) {
   return history.flatMap(message => message.attachments)
     .filter(a => a.mediaType === SPEC_MEDIA_TYPE).at(-1) || null;
 }
 
-function slug(title) {
+function slugify(title) {
   return (title || 'report').toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')

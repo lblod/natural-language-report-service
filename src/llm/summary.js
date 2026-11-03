@@ -3,7 +3,7 @@
 // short Dutch sentence, at most MAX_LENGTH characters. It stays outside the
 // execution, so it can move to another service later.
 
-import { chat } from './loop.js';
+import { callLlm } from './loop.js';
 
 const MAX_LENGTH = 300;
 
@@ -20,16 +20,16 @@ export async function describeReport(turns, title) {
     .filter(t => t.content && t.content.trim())
     .map(t => `${t.role === 'assistant' ? 'Assistent' : 'Gebruiker'}: ${t.content.trim()}`)
     .join('\n\n');
-  const { message } = await chat([
+  const { message } = await callLlm([
     { role: 'system', content: DESCRIPTION_PROMPT },
     { role: 'user', content: `Rapporttitel: ${title || '(geen titel)'}\n\nGesprek:\n${transcript}` },
   ]);
-  return shorten(firstText(message)) || shorten(title);
+  return shorten(readFirstText(message)) || shorten(title);
 }
 
 // Reasoning models may leave `content` empty and put the visible text in a
 // separate field. Read the visible fields in order and take the first one.
-function firstText(message) {
+function readFirstText(message) {
   for (const key of ['content', 'reasoning_content', 'reasoning', 'thinking']) {
     const v = message?.[key];
     if (typeof v === 'string' && v.trim()) return v;

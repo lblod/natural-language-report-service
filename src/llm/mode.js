@@ -3,7 +3,7 @@
 // is the default when the call fails or the answer is unclear: running a
 // report on a guess is worse than asking once more.
 
-import { chat } from './loop.js';
+import { callLlm } from './loop.js';
 
 const MODE_PROMPT = `You read a conversation between a user and a report assistant.
 The assistant proposes report specs and asks the user to confirm before
@@ -29,20 +29,20 @@ no markdown.`;
 export async function wantsExecution(turns) {
   let message;
   try {
-    ({ message } = await chat([{ role: 'system', content: MODE_PROMPT }, ...turns.slice(-6)]));
+    ({ message } = await callLlm([{ role: 'system', content: MODE_PROMPT }, ...turns.slice(-6)]));
   } catch {
     // The call failed (no LLM, provider down). Refine: safer than running a
     // report on a guess, and the refine loop will surface the real error.
     return false;
   }
-  return stripMarkdown(firstText(message)).trim().toLowerCase().startsWith('true');
+  return stripMarkdown(readFirstText(message)).trim().toLowerCase().startsWith('true');
 }
 
 // Reasoning models may leave `content` empty and put the visible text in a
 // separate field (reasoning_content / thinking / reasoning), or may not
 // answer at all when the thinking burned the token budget. Read the visible
 // fields in order and take the first non-empty one.
-function firstText(message) {
+function readFirstText(message) {
   for (const key of ['content', 'reasoning_content', 'reasoning', 'thinking']) {
     const v = message?.[key];
     if (typeof v === 'string' && v.trim()) return v;

@@ -1,5 +1,5 @@
 import { query, sparqlEscapeUri } from 'mu';
-import { hopsPattern, wherePatterns } from './seed.js';
+import { buildHopsPattern, buildWherePatterns } from './seed.js';
 
 // Fetch the column values of the subjects. Columns with the same path and
 // the same rep:where share one query. rep:self columns (empty path) need no
@@ -16,7 +16,7 @@ export async function fetchColumns(subjects, spec) {
   for (const group of groups) {
     for (let i = 0; i < subjects.length; i += SUBJECT_CHUNK_SIZE) {
       const chunk = subjects.slice(i, i + SUBJECT_CHUNK_SIZE);
-      const result = await query(groupQuery(group, chunk));
+      const result = await query(buildGroupQuery(group, chunk));
       collect(result, group, values);
     }
   }
@@ -38,14 +38,14 @@ function groupColumns(columns) {
   return [...groups.values()];
 }
 
-function groupQuery(group, chunk) {
+function buildGroupQuery(group, chunk) {
   const subjects = chunk.map(sparqlEscapeUri).join(' ');
   // every hop except the last gets its own variable; the leaf is ?v
-  const lines = [hopsPattern(group.hops, 'x', '?s', '?v')];
+  const lines = [buildHopsPattern(group.hops, 'x', '?s', '?v')];
   // rep:where hangs on the column's own nodes: ?x_<k> after k hops, ?v at
   // the end.
   const nodeVar = (k) => (k === group.hops.length ? '?v' : `?x_${k}`);
-  lines.push(...wherePatterns(group.where, group.hops, nodeVar, 'c'));
+  lines.push(...buildWherePatterns(group.where, group.hops, nodeVar, 'c'));
   const vars = ['?s', ...group.hops.slice(1).map((hop, i) => `?x_${i + 1}`), '?v'];
   return `SELECT DISTINCT ${vars.join(' ')} WHERE {\n  VALUES ?s { ${subjects} }\n  ${lines.join('\n  ')}\n}`;
 }

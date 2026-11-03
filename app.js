@@ -55,7 +55,7 @@ app.post('/assistant/conversations/:id/turns', bodyParser.json(), async function
         // The description is written from the conversation right before the
         // run, outside the execution itself.
         const description = await describeReport(history, prepared.spec.title || conversation.title);
-        answer = await executeSpec(prepared, conversation.title, profiles, description);
+        answer = await executeSpec(prepared, conversation, profiles, description);
       }
     } else {
       answer = await refineSpec(turns, profiles);

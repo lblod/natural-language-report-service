@@ -65,13 +65,13 @@ function parseField(store, p) {
     name: one(SH + 'name'),
     datatype: one(SH + 'datatype'),
     class: one(SH + 'class'),
-    nodes: linkedShapes(store, p, one(SH + 'name')),
+    nodes: findLinkedShapes(store, p, one(SH + 'name')),
   };
 }
 
 // The entities a field links to: its sh:node, or the sh:node of each item of
 // its sh:or (SHACL for "each value is one of these").
-function linkedShapes(store, p, name) {
+function findLinkedShapes(store, p, name) {
   const node = store.getQuads(p, SH + 'node', null)[0]?.object;
   if (node) return [node.value];
   const or = store.getQuads(p, SH + 'or', null)[0]?.object;
@@ -113,16 +113,16 @@ function parseDiscriminator(store, node, shapeUri) {
 // The shape a spec starts from. rep:entity wins; a targetClass only resolves
 // when exactly one shape carries it, so a class two entities share is a
 // validator error, not a silent first match.
-export function startShape(profile, spec) {
-  if (spec.entity) return shape(profile, spec.entity);
+export function findStartShape(profile, spec) {
+  if (spec.entity) return findShape(profile, spec.entity);
   const matches = profile.shapes.filter(s => s.targetClass === spec.targetClass);
   return matches.length === 1 ? matches[0] : null;
 }
 
-export function shape(profile, shapeUri) {
+export function findShape(profile, shapeUri) {
   return profile.shapes.find(s => s.uri === shapeUri) || null;
 }
 
-export function fieldsOf(profile, shapeUri) {
-  return shape(profile, shapeUri)?.fields || [];
+export function getFields(profile, shapeUri) {
+  return findShape(profile, shapeUri)?.fields || [];
 }

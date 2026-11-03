@@ -246,7 +246,7 @@ read the conversation.
 | `sioc:Post`, `sioct:InstantMessage` | a message: `sioc:content`, `foaf:maker`, `as:attachment` to its bijlagen |
 | `nfo:FileDataObject` | a bijlage; `dct:type` says spec or executed report |
 | `reporting:Report` | one per run; `dct:title`, a Dutch `dct:description` of at most 300 characters, `prov:generated` to the CSV, and `dct:conformsTo` its spec |
-| `reporting:ReportSpec` | the spec of one run; the same title, description and creation time, and `prov:generated` to the CSV |
+| `reporting:ReportSpec` | the spec of one run; the same title, description and creation time, `prov:generated` to the CSV, and `dct:isPartOf` its conversation |
 
 The two bijlage types:
 

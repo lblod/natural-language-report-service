@@ -56,7 +56,7 @@ function readWhere(store, node) {
 
 // The number of steps two paths have in common from the row. A rep:where
 // shares those nodes with its filter or column.
-export function sharedSteps(a, b) {
+export function countSharedSteps(a, b) {
   let k = 0;
   while (k < a.length && k < b.length
     && a[k].predicate === b[k].predicate && !!a[k].inverse === !!b[k].inverse) k++;
@@ -114,22 +114,22 @@ function readConstraints(store, p, { withLabel = false } = {}) {
   const maxCount = one(SH + 'maxCount');
   if (maxCount) constraints.maxCount = Number(maxCount.value);
   const hasValue = one(SH + 'hasValue');
-  if (hasValue) constraints.hasValue = term(hasValue);
+  if (hasValue) constraints.hasValue = toTerm(hasValue);
   const inList = one(SH + 'in');
-  if (inList) constraints.in = readRdfList(store, inList).map(term);
+  if (inList) constraints.in = readRdfList(store, inList).map(toTerm);
   for (const [key, pred] of [
     ['minInclusive', SH + 'minInclusive'], ['maxInclusive', SH + 'maxInclusive'],
     ['minExclusive', SH + 'minExclusive'], ['maxExclusive', SH + 'maxExclusive'],
   ]) {
     const q = one(pred);
-    if (q) constraints[key] = term(q);
+    if (q) constraints[key] = toTerm(q);
   }
   const pattern = one(SH + 'pattern');
   if (pattern) constraints.pattern = pattern.value;
   const flags = one(SH + 'flags');
   if (flags) constraints.flags = flags.value;
   const anyOf = one(REP + 'anyOf');
-  if (anyOf) constraints.anyOf = readRdfList(store, anyOf).map(term)
+  if (anyOf) constraints.anyOf = readRdfList(store, anyOf).map(toTerm)
     .map(t => ({ type: t.type, value: t.value }));
   // read but never used by the runner; check.js refuses it (a filter has no label)
   if (withLabel) {
@@ -151,7 +151,7 @@ export function readRdfList(store, node) {
   return items;
 }
 
-function term(object) {
+function toTerm(object) {
   if (object.termType === 'NamedNode') return { type: 'uri', value: object.value };
   return {
     type: 'literal',

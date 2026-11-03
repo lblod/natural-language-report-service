@@ -96,13 +96,13 @@ Reply to the user in Dutch. Earlier turns are context only. Answer the last one.
 // attachments }], newest last. Returns the answer text and the last spec
 // validate_spec accepted in this turn, or null.
 export async function ask(turns, profiles) {
-  const current = currentSpec(turns);
-  const messages = [{ role: 'system', content: await systemPrompt(current, profiles) },
-    ...withCurrentSpec(turns.map(withSpecHint), current)];
+  const current = findCurrentSpec(turns);
+  const messages = [{ role: 'system', content: await buildSystemPrompt(current, profiles) },
+    ...addCurrentSpec(turns.map(addSpecHint), current)];
   let spec = null;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const { message } = await chat(newestSpecOnly(messages), TOOLS);
+    const { message } = await callLlm(leaveOutOlderSpecs(messages), TOOLS);
     messages.push(message);
     const calls = message.tool_calls || [];
     if (!calls.length) return { text: message.content || '', spec };
@@ -137,20 +137,20 @@ export async function ask(turns, profiles) {
 // line per spec under the message text, so the model knows a spec is there
 // and can open it with read_spec when the user asks for it. A spec the model
 // printed in its answer anyway is cut from the text.
-function withSpecHint(turn) {
-  const content = turn.role === 'assistant' ? withoutSpecText(turn.content) : turn.content;
+function addSpecHint(turn) {
+  const content = turn.role === 'assistant' ? cutSpecText(turn.content) : turn.content;
   const specs = (turn.attachments || []).filter(a => a.mediaType === SPEC_MEDIA_TYPE);
   if (!specs.length) return { ...turn, content };
   const hints = specs.map(a => `Bijlage "${a.name}", a spec file.`);
   return { ...turn, content: `${content}\n\n${hints.join('\n\n')}` };
 }
 
-function withoutSpecText(text) {
+function cutSpecText(text) {
   return text.replace(/```[\s\S]*?```/g, block => (block.includes('ReportSpec') ? '(spec left out)' : block));
 }
 
 // The current spec: the last spec bijlage in the conversation, or null.
-function currentSpec(turns) {
+function findCurrentSpec(turns) {
   const name = turns.flatMap(t => t.attachments || [])
     .filter(a => a.mediaType === SPEC_MEDIA_TYPE).at(-1)?.name;
   const turtle = name && readSpecFile(name);
@@ -160,9 +160,9 @@ function currentSpec(turns) {
 // The system prompt also carries what the model would otherwise fetch at the
 // start of every turn: the profile list, and the menu of the current spec's
 // profile. Without a menu the model calls describe_profile itself.
-async function systemPrompt(current, profiles) {
+async function buildSystemPrompt(current, profiles) {
   const parts = [REFINE_PROMPT, `The profiles:\n${listProfiles(profiles)}`];
-  const uri = current && profileOf(current.turtle);
+  const uri = current && readProfileUri(current.turtle);
   if (profiles.has(uri)) {
     try {
       parts.push(`The menu of the current spec's profile <${uri}>:\n\n${await describeProfile(profiles.get(uri))}`);
@@ -177,7 +177,7 @@ function listProfiles(profiles) {
   return [...profiles.values()].map(p => `${p.title}  <${p.uri}>`).join('\n');
 }
 
-function profileOf(turtle) {
+function readProfileUri(turtle) {
   try {
     return parseSpec(turtle).profileUri;
   } catch {
@@ -187,7 +187,7 @@ function profileOf(turtle) {
 
 // The current spec goes in full under the user's new message: the one spec
 // the history holds as text.
-function withCurrentSpec(messages, current) {
+function addCurrentSpec(messages, current) {
   if (!current) return messages;
   const { name, turtle } = current;
   const last = messages.at(-1);
@@ -200,7 +200,7 @@ function withCurrentSpec(messages, current) {
 
 // Only the newest spec goes to the model in full. A message that holds an
 // older one goes in its leftOut form; read_spec opens that spec again.
-function newestSpecOnly(messages) {
+function leaveOutOlderSpecs(messages) {
   const newest = messages.findLastIndex(m => m.leftOut);
   return messages.map((m, i) => (m.leftOut && i !== newest ? { ...m, ...m.leftOut } : m));
 }
@@ -212,7 +212,7 @@ function leaveOutSpec(call) {
 
 // The one place that talks to the provider. Without tools it is a plain
 // completion (the mode check).
-export async function chat(messages, tools = null) {
+export async function callLlm(messages, tools = null) {
   // Send only the fields every provider accepts back. Attachments never go
   // out.
   const wire = messages.map(m => {
@@ -238,7 +238,7 @@ export async function chat(messages, tools = null) {
   } else {
     console.log('[llm] sending instructions to llm');
   }
-  const data = await post(body);
+  const data = await postWithRetry(body);
   if (LOG_LLM) {
     console.log(`[llm] response:\n${JSON.stringify(data, null, 2)}`);
   }
@@ -247,7 +247,7 @@ export async function chat(messages, tools = null) {
 
 // POST to the provider, with retries. A network error or a status in
 // LLM_RETRY_STATUS waits and tries again; the last failure is thrown.
-async function post(body) {
+async function postWithRetry(body) {
   for (let attempt = 0; ; attempt++) {
     let res;
     try {

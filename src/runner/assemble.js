@@ -1,4 +1,4 @@
-import { sharedSteps } from './spec.js';
+import { countSharedSteps } from './spec.js';
 
 // Values to rows, paired by URI on every step. Two columns that walk the
 // same steps (with the same rep:where on them) share the nodes on those
@@ -23,7 +23,7 @@ export const NUMERIC_DATATYPES = new Set([
 // The rows of the report, the header first. values: subject → column
 // index → chains, one term per step (see columns.js).
 export function assemble(subjects, values, spec) {
-  const tree = columnTree(spec.columns);
+  const tree = buildColumnTree(spec.columns);
   const rows = [spec.columns.map(c => c.label)];
   for (const subject of [...subjects].sort()) {
     const top = { term: { value: subject }, below: new Map() };
@@ -31,7 +31,7 @@ export function assemble(subjects, values, spec) {
       for (const chain of chains) addChain(top, tree.paths[index], chain);
     }
     const seen = new Set();
-    for (const cells of rowsAt(tree.root, top, tree, spec.columns)) {
+    for (const cells of buildRowsAt(tree.root, top, tree, spec.columns)) {
       const row = spec.columns.map((col, i) => cells.get(i) ?? '');
       const key = JSON.stringify(row);
       if (!seen.has(key)) {
@@ -47,13 +47,13 @@ export function assemble(subjects, values, spec) {
 // branch as long as they took the same steps with the same rep:where on
 // them. paths[i] lists the branches column i goes through; a branch knows
 // the columns that end on it and the columns that go through it.
-function columnTree(columns) {
+function buildColumnTree(columns) {
   const newBranch = () => ({ next: new Map(), ends: [], columns: [] });
   const root = newBranch();
   const paths = columns.map((col, index) => {
     let branch = root;
     const branches = col.path.map((hop, k) => {
-      const where = col.where.filter(w => sharedSteps(col.path, w.path) === k + 1);
+      const where = col.where.filter(w => countSharedSteps(col.path, w.path) === k + 1);
       const key = `${hop.inverse ? '^' : ''}${hop.predicate} ${JSON.stringify(where)}`;
       if (!branch.next.has(key)) branch.next.set(key, newBranch());
       branch = branch.next.get(key);
@@ -80,13 +80,13 @@ function addChain(found, branches, chain) {
 
 // The rows under one found node: its own cells, times the rows of each
 // branch below it. A branch where nothing was found adds empty cells.
-function rowsAt(branch, found, tree, columns) {
+function buildRowsAt(branch, found, tree, columns) {
   let rows = [new Map(branch.ends.map(i => [i, found.term.value]))];
   for (const next of branch.next.values()) {
     const nodes = [...(found.below.get(next)?.values() || [])];
     const below = next.columns.every(i => FOLDING.includes(columns[i].collect))
       ? [fold(next, nodes, tree, columns)]
-      : nodes.length ? nodes.flatMap(node => rowsAt(next, node, tree, columns)) : [new Map()];
+      : nodes.length ? nodes.flatMap(node => buildRowsAt(next, node, tree, columns)) : [new Map()];
     rows = rows.flatMap(row => below.map(cells => new Map([...row, ...cells])));
   }
   return rows;
@@ -98,20 +98,20 @@ function fold(branch, nodes, tree, columns) {
   const cells = new Map();
   for (const i of branch.columns) {
     const rest = tree.paths[i].slice(tree.paths[i].indexOf(branch) + 1);
-    const terms = nodes.flatMap(node => termsBelow(node, rest));
+    const terms = nodes.flatMap(node => collectTermsBelow(node, rest));
     const unique = [...new Map(terms.map(t => [t.value, t])).values()];
     const col = columns[i];
     cells.set(i, col.collect === SH + 'groupConcat'
       ? unique.map(t => t.value).join(col.separator ?? ',')
-      : extreme(unique, col, col.collect === SH + 'min' ? -1 : 1));
+      : pickExtreme(unique, col, col.collect === SH + 'min' ? -1 : 1));
   }
   return cells;
 }
 
-function termsBelow(node, rest) {
+function collectTermsBelow(node, rest) {
   if (!rest.length) return [node.term];
   const byValue = node.below.get(rest[0]);
-  return byValue ? [...byValue.values()].flatMap(next => termsBelow(next, rest.slice(1))) : [];
+  return byValue ? [...byValue.values()].flatMap(next => collectTermsBelow(next, rest.slice(1))) : [];
 }
 
 // min/max. Numbers compare as numbers. Dates and times compare as text:
@@ -119,7 +119,7 @@ function termsBelow(node, rest) {
 // Numbers mixed with other values throw: check.js should have caught it,
 // and a silently wrong cell is worse than a failed job. The terms are SPARQL
 // JSON bindings, so the datatype is a plain string.
-function extreme(terms, col, direction) {
+function pickExtreme(terms, col, direction) {
   if (!terms.length) return '';
   const numbers = terms.filter(t => NUMERIC_DATATYPES.has(t.datatype)).length;
   if (numbers && numbers < terms.length) {

@@ -1,6 +1,6 @@
-import { startShape, fieldsOf } from './profile.js';
+import { findStartShape, getFields } from './profile.js';
 import { NUMERIC_DATATYPES } from './assemble.js';
-import { sharedSteps } from './spec.js';
+import { countSharedSteps } from './spec.js';
 
 const SH = 'http://www.w3.org/ns/shacl#';
 const REP = 'http://mu.semte.ch/vocabularies/reporting/';
@@ -18,7 +18,7 @@ const ANYOF_MAX_TERMS = 24;
 const ANYOF_MAX_TERM_LENGTH = 100;
 
 // null when the profile exists, else what to write instead.
-export function profileError(profiles, uri) {
+export function checkProfile(profiles, uri) {
   if (profiles.has(uri)) return null;
   return `no profile <${uri}>. Available: ${[...profiles.values()].map(p => p.title).join(', ')}.`;
 }
@@ -26,14 +26,14 @@ export function profileError(profiles, uri) {
 // The spec names an entity we have: by rep:entity, or by a targetClass only
 // one entity carries. A class two entities share is refused with both names,
 // so the model can add rep:entity instead of guessing.
-function startEntity(spec, profile) {
+function checkStartEntity(spec, profile) {
   if (!spec.targetClass) {
-    return `no sh:targetClass. In "${profile.title}" you can list: ${shapeList(profile)}.`;
+    return `no sh:targetClass. In "${profile.title}" you can list: ${listShapes(profile)}.`;
   }
   if (spec.entity) {
     const s = profile.shapes.find(x => x.uri === spec.entity);
     if (!s) {
-      return `no entity <${spec.entity}> in "${profile.title}". It has: ${shapeList(profile)}.`;
+      return `no entity <${spec.entity}> in "${profile.title}". It has: ${listShapes(profile)}.`;
     }
     if (s.targetClass !== spec.targetClass) {
       return `rep:entity <${spec.entity}> is a <${s.targetClass}>, but sh:targetClass says <${spec.targetClass}>. Make them agree.`;
@@ -43,20 +43,20 @@ function startEntity(spec, profile) {
   const matches = profile.shapes.filter(s => s.targetClass === spec.targetClass);
   if (matches.length === 1) return null;
   if (!matches.length) {
-    return `"${profile.title}" cannot list <${spec.targetClass}>. It has: ${shapeList(profile)}.`;
+    return `"${profile.title}" cannot list <${spec.targetClass}>. It has: ${listShapes(profile)}.`;
   }
   const names = matches.map(m => `${m.label || m.uri} <${m.uri}>`).join(', ');
   return `<${spec.targetClass}> is the class of ${matches.length} entities: ${names}. Add rep:entity <...> to say which one.`;
 }
 
-function shapeList(profile) {
+function listShapes(profile) {
   return profile.shapes.map(s => s.label || s.targetClass).join(', ');
 }
 
 // Every condition in the spec: the filters, and the rep:where conditions on
 // filters and columns, with the words that name each one in a message. A
 // rep:where also carries its host, the filter or column it hangs on.
-function conditions(spec) {
+function collectConditions(spec) {
   const out = spec.filters.map((f, i) => ({ what: `filter ${i + 1}`, cond: f }));
   spec.filters.forEach((f, i) => f.where.forEach((w, j) => out.push({
     what: `rep:where ${j + 1} on filter ${i + 1}`, cond: w,
@@ -69,19 +69,19 @@ function conditions(spec) {
   return out;
 }
 
-function columnsPresent(spec) {
+function checkColumnsPresent(spec) {
   if (!spec.columns.length) return 'no columns. Add at least one rep:columns entry.';
   return null;
 }
 
-function columnLabel(spec) {
+function checkColumnLabel(spec) {
   for (const col of spec.columns) {
     if (!col.label) return 'a column has no rdfs:label.';
   }
   return null;
 }
 
-function columnLabelsUnique(spec) {
+function checkColumnLabelsUnique(spec) {
   const seen = new Set();
   for (const col of spec.columns) {
     if (seen.has(col.label)) {
@@ -93,15 +93,15 @@ function columnLabelsUnique(spec) {
 }
 
 // Every path resolves, columns end on a value, depth capped
-function pathsResolve(spec, profile) {
-  const startShapeUri = startShape(profile, spec).uri;
+function checkPathsResolve(spec, profile) {
+  const startShapeUri = findStartShape(profile, spec).uri;
   for (const col of spec.columns) {
-    const err = walk(profile, startShapeUri, col.path,
+    const err = checkPath(profile, startShapeUri, col.path,
       `column "${col.label}"`, true, col.nodeKind === SH + 'IRI');
     if (err) return err;
   }
   for (const [i, filter] of spec.filters.entries()) {
-    const err = walk(profile, startShapeUri, filter.path,
+    const err = checkPath(profile, startShapeUri, filter.path,
       `filter ${i + 1}`, false);
     if (err) return err;
   }
@@ -109,15 +109,15 @@ function pathsResolve(spec, profile) {
 }
 
 // sh:min/sh:max only on numbers and dates
-function collectMinMaxTyped(spec, profile) {
-  const startShapeUri = startShape(profile, spec).uri;
+function checkCollectMinMaxTyped(spec, profile) {
+  const startShapeUri = findStartShape(profile, spec).uri;
   for (const col of spec.columns) {
     if (col.collect !== SH + 'min' && col.collect !== SH + 'max') continue;
     const name = col.collect === SH + 'min' ? 'sh:min' : 'sh:max';
     if (!col.path.length) return `${name} on a rep:self column does not apply. A subject URI is not a number or date.`;
     const last = col.path[col.path.length - 1];
-    // no end field: pathsResolve already reported the real error
-    const f = endFields(profile, startShapeUri, col.path)
+    // no end field: checkPathsResolve already reported the real error
+    const f = findEndFields(profile, startShapeUri, col.path)
       .find(x => x.datatype !== XSD_DATETIME && x.datatype !== XSD_DATE && !NUMERIC_DATATYPES.has(x.datatype));
     if (f) {
       return `"${f.name || last.predicate}" is text, so ${name} does not apply. Use rep:row (same as leaving rep:collect out: every value gets its own row).`;
@@ -126,7 +126,7 @@ function collectMinMaxTyped(spec, profile) {
   return null;
 }
 
-function oneRowColumn(spec) {
+function checkOneRowColumn(spec) {
   const rowCols = spec.columns.filter(c => c.collect === REP + 'row');
   if (rowCols.length > 1) {
     const names = rowCols.map(c => `"${c.label}"`).join(' and ');
@@ -136,7 +136,7 @@ function oneRowColumn(spec) {
 }
 
 // Columns carry no constraints; known collect mode
-function columnPure(spec) {
+function checkColumnPure(spec) {
   for (const col of spec.columns) {
     if (Object.keys(col.constraints || {}).length) {
       const which = Object.keys(col.constraints)[0];
@@ -153,8 +153,8 @@ function columnPure(spec) {
 }
 
 // No label inside a filter or rep:where
-function filterLabel(spec) {
-  for (const { what, cond } of conditions(spec)) {
+function checkFilterLabel(spec) {
+  for (const { what, cond } of collectConditions(spec)) {
     if ((cond.constraints || {}).label) {
       return `${what} carries rdfs:label. Move it to rep:columns to show it.`;
     }
@@ -164,10 +164,10 @@ function filterLabel(spec) {
 
 // A filter with a path but no constraint selects everything; the model
 // almost certainly meant to filter. Refuse and say what to add.
-function filterConstraint(spec) {
+function checkFilterConstraint(spec) {
   const MEANINGFUL = ['minCount', 'maxCount', 'hasValue', 'in', 'minInclusive',
     'maxInclusive', 'minExclusive', 'maxExclusive', 'pattern', 'flags', 'anyOf'];
-  for (const { what, cond } of conditions(spec)) {
+  for (const { what, cond } of collectConditions(spec)) {
     const c = cond.constraints || {};
     if (!MEANINGFUL.some(k => c[k] !== undefined && c[k] !== null)) {
       const p = cond.path.map(h => h.predicate).join(' → ');
@@ -179,8 +179,8 @@ function filterConstraint(spec) {
 
 // The runner cannot count: it knows sh:maxCount 0 (none) and sh:minCount 1
 // or 2 (two distinct values), nothing more.
-function countLimits(spec) {
-  for (const { cond } of conditions(spec)) {
+function checkCountLimits(spec) {
+  for (const { cond } of collectConditions(spec)) {
     const c = cond.constraints;
     if (c.maxCount > 0) {
       return `sh:maxCount ${c.maxCount} needs counting, which this service cannot do. Use sh:maxCount 0 for "has none", or drop it.`;
@@ -192,8 +192,8 @@ function countLimits(spec) {
   return null;
 }
 
-function anyOfLimits(spec) {
-  for (const { cond } of conditions(spec)) {
+function checkAnyOfLimits(spec) {
+  for (const { cond } of collectConditions(spec)) {
     const c = cond.constraints;
     if (!c.anyOf) continue;
     if (c.anyOf.length > ANYOF_MAX_TERMS) {
@@ -212,8 +212,8 @@ function anyOfLimits(spec) {
 }
 
 // sh:in must not mix URIs and literals
-function inHomogeneous(spec) {
-  for (const { cond } of conditions(spec)) {
+function checkInHomogeneous(spec) {
+  for (const { cond } of collectConditions(spec)) {
     const c = cond.constraints;
     if (!c.in) continue;
     const uris = c.in.filter(t => t.type === 'uri').length;
@@ -224,9 +224,9 @@ function inHomogeneous(spec) {
   return null;
 }
 
-function literalsParse(spec) {
+function checkLiteralsParse(spec) {
   const constraintTerms = [];
-  for (const { cond } of conditions(spec)) {
+  for (const { cond } of collectConditions(spec)) {
     const c = cond.constraints;
     for (const key of ['hasValue', 'minInclusive', 'maxInclusive', 'minExclusive', 'maxExclusive']) {
       if (c[key]) constraintTerms.push(c[key]);
@@ -247,16 +247,16 @@ function literalsParse(spec) {
 
 // rep:where: walks from the row through the profile, shares at least one
 // step with its filter or column, and holds no rep:where of its own.
-function whereConditions(spec, profile) {
-  const startShapeUri = startShape(profile, spec).uri;
-  for (const { what, cond, host } of conditions(spec)) {
+function checkWhereConditions(spec, profile) {
+  const startShapeUri = findStartShape(profile, spec).uri;
+  for (const { what, cond, host } of collectConditions(spec)) {
     if (!host) continue;
     if (cond.where.length) {
       return `${what} holds a rep:where of its own. Put every rep:where directly on the filter or column.`;
     }
-    const err = walk(profile, startShapeUri, cond.path, what, false);
+    const err = checkPath(profile, startShapeUri, cond.path, what, false);
     if (err) return err;
-    const k = sharedSteps(host.path, cond.path);
+    const k = countSharedSteps(host.path, cond.path);
     if (!k) {
       return `${what} shares no step with ${host.what}. Start its path with the same steps as ${host.what}; a condition on the row itself goes in sh:property.`;
     }
@@ -276,19 +276,19 @@ function whereConditions(spec, profile) {
 // A date or number condition compares values. On a link (an entity or a
 // code) it compares a URI and never matches, so its path must end on a field
 // with a datatype.
-function rangeOnValue(spec, profile) {
-  const startShapeUri = startShape(profile, spec).uri;
-  for (const { what, cond } of conditions(spec)) {
+function checkRangeOnValue(spec, profile) {
+  const startShapeUri = findStartShape(profile, spec).uri;
+  for (const { what, cond } of collectConditions(spec)) {
     const key = ['minInclusive', 'maxInclusive', 'minExclusive', 'maxExclusive']
       .find(k => cond.constraints[k]);
     if (!key || !cond.path.length) continue;
-    // pathsResolve reports a missing step
-    const f = endFields(profile, startShapeUri, cond.path).find(x => !x.datatype);
+    // checkPathsResolve reports a missing step
+    const f = findEndFields(profile, startShapeUri, cond.path).find(x => !x.datatype);
     if (!f) continue;
     const target = f.nodes.length
-      ? f.nodes.map(uri => shapeName(profile, uri)).join(' or ')
+      ? f.nodes.map(uri => getShapeName(profile, uri)).join(' or ')
       : `the code "${f.name}"`;
-    const steps = [...new Set(f.nodes.flatMap(uri => fieldsOf(profile, uri))
+    const steps = [...new Set(f.nodes.flatMap(uri => getFields(profile, uri))
       .filter(x => x.datatype === XSD_DATE || x.datatype === XSD_DATETIME || NUMERIC_DATATYPES.has(x.datatype))
       .map(x => `${x.name} (${x.path})`))];
     const add = steps.length ? `Add a step: ${steps.join(' or ')}.` : 'End the path on a date or number field.';
@@ -299,26 +299,26 @@ function rangeOnValue(spec, profile) {
 
 // Where each rep:where applies, in the profile's words, so the proposal can
 // say it. Profile only, no database.
-export function whereNotes(spec, profile) {
-  const startShapeUri = startShape(profile, spec).uri;
-  return conditions(spec).filter(x => x.host).map(({ what, cond, host }) => {
-    const k = sharedSteps(host.path, cond.path);
-    return `${what} applies at ${nodeName(profile, startShapeUri, host.path.slice(0, k))}, after step ${k} of ${host.what}.`;
+export function buildWhereNotes(spec, profile) {
+  const startShapeUri = findStartShape(profile, spec).uri;
+  return collectConditions(spec).filter(x => x.host).map(({ what, cond, host }) => {
+    const k = countSharedSteps(host.path, cond.path);
+    return `${what} applies at ${getNodeName(profile, startShapeUri, host.path.slice(0, k))}, after step ${k} of ${host.what}.`;
   });
 }
 
 // The entity a path lands on, or the value field when it ends on one. A
 // step that leads to several entities names them all.
-function nodeName(profile, startShapeUri, hops) {
-  if (!hops.length) return shapeName(profile, startShapeUri);
-  const ends = endFields(profile, startShapeUri, hops);
+function getNodeName(profile, startShapeUri, hops) {
+  if (!hops.length) return getShapeName(profile, startShapeUri);
+  const ends = findEndFields(profile, startShapeUri, hops);
   if (!ends.length) return `step ${hops.length}`;
   const value = ends.find(f => !f.nodes.length);
   if (value) return `the value "${value.name}"`;
-  return [...new Set(ends.flatMap(f => f.nodes))].map(uri => shapeName(profile, uri)).join(' or ');
+  return [...new Set(ends.flatMap(f => f.nodes))].map(uri => getShapeName(profile, uri)).join(' or ');
 }
 
-function shapeName(profile, shapeUri) {
+function getShapeName(profile, shapeUri) {
   return `"${profile.shapes.find(s => s.uri === shapeUri)?.label || shapeUri}"`;
 }
 
@@ -328,30 +328,30 @@ function parsesAsDate(value, withTime) {
   return withTime ? value.includes('T') : /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
-// In this order: startEntity comes first, the checks after it rely on a
+// In this order: checkStartEntity comes first, the checks after it rely on a
 // start shape.
 const CHECKS = [
-  startEntity,
-  columnsPresent,
-  columnLabel,
-  columnLabelsUnique,
-  columnPure,
-  filterLabel,
-  filterConstraint,
-  countLimits,
-  anyOfLimits,
-  inHomogeneous,
-  literalsParse,
-  oneRowColumn,
-  pathsResolve,
-  whereConditions,
-  rangeOnValue,
-  collectMinMaxTyped,
+  checkStartEntity,
+  checkColumnsPresent,
+  checkColumnLabel,
+  checkColumnLabelsUnique,
+  checkColumnPure,
+  checkFilterLabel,
+  checkFilterConstraint,
+  checkCountLimits,
+  checkAnyOfLimits,
+  checkInHomogeneous,
+  checkLiteralsParse,
+  checkOneRowColumn,
+  checkPathsResolve,
+  checkWhereConditions,
+  checkRangeOnValue,
+  checkCollectMinMaxTyped,
 ];
 
 // The first error, or null when the spec is fine.
 export function checkSpec(spec, profiles) {
-  const error = profileError(profiles, spec.profileUri);
+  const error = checkProfile(profiles, spec.profileUri);
   if (error) return error;
   const profile = profiles.get(spec.profileUri);
   for (const check of CHECKS) {
@@ -365,23 +365,23 @@ export function checkSpec(spec, profiles) {
 // may link to several entities (sh:or of sh:node: an eenheid's political and
 // leidinggevende organen): the walk follows them all and the next steps
 // decide. The query follows predicates only, so this is what the data does.
-function hopFields(profile, shapeUris, hop) {
-  return shapeUris.flatMap(uri => fieldsOf(profile, uri)
+function findHopFields(profile, shapeUris, hop) {
+  return shapeUris.flatMap(uri => getFields(profile, uri)
     .filter(f => f.path === hop.predicate && !!f.inverse === !!hop.inverse));
 }
 
 // The fields a path can end on: follow sh:node through every hop but the
-// last. walk() has already validated the path, so none here means the walk
+// last. checkPath() has already validated the path, so none here means it
 // reported the real error and the caller can bail.
-function endFields(profile, startShapeUri, hops) {
+function findEndFields(profile, startShapeUri, hops) {
   let shapeUris = [startShapeUri];
   for (const hop of hops.slice(0, -1)) {
-    shapeUris = [...new Set(hopFields(profile, shapeUris, hop).flatMap(f => f.nodes))];
+    shapeUris = [...new Set(findHopFields(profile, shapeUris, hop).flatMap(f => f.nodes))];
   }
-  return hopFields(profile, shapeUris, hops[hops.length - 1]);
+  return findHopFields(profile, shapeUris, hops[hops.length - 1]);
 }
 
-function walk(profile, startShapeUri, hops, what, isColumn, wantsIri = false) {
+function checkPath(profile, startShapeUri, hops, what, isColumn, wantsIri = false) {
   if (hops.length > MAX_PATH_DEPTH) {
     return `${what} walks ${hops.length} hops. The limit is ${MAX_PATH_DEPTH}.`;
   }
@@ -389,11 +389,11 @@ function walk(profile, startShapeUri, hops, what, isColumn, wantsIri = false) {
   let shapeUris = [startShapeUri];
   for (let i = 0; i < hops.length; i++) {
     const hop = hops[i];
-    const found = hopFields(profile, shapeUris, hop);
+    const found = findHopFields(profile, shapeUris, hop);
     if (!found.length) {
-      const have = [...new Set(shapeUris.flatMap(uri => fieldsOf(profile, uri))
+      const have = [...new Set(shapeUris.flatMap(uri => getFields(profile, uri))
         .map(x => (x.inverse ? `${x.name} (${x.path}, inverse)` : `${x.name} (${x.path})`)))].join(', ');
-      const shapeLabel = shapeUris.map(uri => shapeName(profile, uri)).join(' or ');
+      const shapeLabel = shapeUris.map(uri => getShapeName(profile, uri)).join(' or ');
       return `at ${shapeLabel} there is no "${hop.predicate}". It has: ${have || '(nothing)'}.`;
     }
     if (i < hops.length - 1) {
@@ -409,7 +409,7 @@ function walk(profile, startShapeUri, hops, what, isColumn, wantsIri = false) {
           return `${what} has sh:nodeKind sh:IRI but ends on the value "${f.name}", which is no URI. Drop sh:nodeKind.`;
         }
         if (!wantsIri && !f.datatype && !f.class) {
-          const valueFields = [...new Set(f.nodes.flatMap(uri => fieldsOf(profile, uri))
+          const valueFields = [...new Set(f.nodes.flatMap(uri => getFields(profile, uri))
             .filter(x => x.datatype || x.class)
             .map(x => `${x.name} (${x.path})`))];
           return `${what} ends on a link. Add a hop: ${valueFields.join(' or ')}. Only if the user asked for the URI of that node itself, add sh:nodeKind sh:IRI to the column instead.`;

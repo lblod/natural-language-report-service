@@ -1,16 +1,16 @@
 import { query, sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime, sparqlEscapeDate } from 'mu';
-import { sharedSteps } from './spec.js';
+import { countSharedSteps } from './spec.js';
 
 // The subjects of a report, one query per page. More than ROW_LIMIT
 // subjects fails the run.
 const ROW_LIMIT = Number(process.env.ROW_LIMIT || 200000);
 const PAGE_SIZE = Number(process.env.SEED_PAGE_SIZE || 5000);
 
-export async function seed(spec, shape) {
+export async function fetchSubjects(spec, shape) {
   const subjects = [];
   let offset = 0;
   for (;;) {
-    const result = await query(seedPageQuery(spec, shape, PAGE_SIZE, offset));
+    const result = await query(buildSeedPageQuery(spec, shape, PAGE_SIZE, offset));
     const rows = result.results.bindings.map(b => b.s.value);
     subjects.push(...rows);
     if (subjects.length > ROW_LIMIT) {
@@ -23,13 +23,13 @@ export async function seed(spec, shape) {
 }
 
 // The validator made sure spec.targetClass is the class of shape.
-function seedPageQuery(spec, shape, limit, offset) {
+function buildSeedPageQuery(spec, shape, limit, offset) {
   const parts = [`?s a ${sparqlEscapeUri(spec.targetClass)} .`];
   shape.discriminators.forEach((d, di) => {
-    parts.push(discriminatorPattern(d, `disc${di}`));
+    parts.push(buildDiscriminatorPattern(d, `disc${di}`));
   });
   spec.filters.forEach((filter, fi) => {
-    parts.push(filterPattern(filter, `f${fi}`));
+    parts.push(buildFilterPattern(filter, `f${fi}`));
   });
   return `SELECT DISTINCT ?s WHERE {
   ${parts.join('\n  ')}
@@ -40,24 +40,24 @@ LIMIT ${limit} OFFSET ${offset}`;
 // A shape that shares its class with another says here what sets its
 // subjects apart. A plain discriminator is a filter; sh:and, sh:or and sh:not
 // become one FILTER over EXISTS tests, which see ?s from outside.
-function discriminatorPattern(d, varPrefix) {
-  if (!d.and && !d.or && !d.not) return filterPattern(d, varPrefix);
-  return `FILTER(${discriminatorTest(d, varPrefix)})`;
+function buildDiscriminatorPattern(d, varPrefix) {
+  if (!d.and && !d.or && !d.not) return buildFilterPattern(d, varPrefix);
+  return `FILTER(${buildDiscriminatorTest(d, varPrefix)})`;
 }
 
-function discriminatorTest(d, varPrefix) {
-  if (d.and) return `(${d.and.map((x, i) => discriminatorTest(x, `${varPrefix}_${i}`)).join(' && ')})`;
-  if (d.or) return `(${d.or.map((x, i) => discriminatorTest(x, `${varPrefix}_${i}`)).join(' || ')})`;
-  if (d.not) return `!(${discriminatorTest(d.not, `${varPrefix}_n`)})`;
+function buildDiscriminatorTest(d, varPrefix) {
+  if (d.and) return `(${d.and.map((x, i) => buildDiscriminatorTest(x, `${varPrefix}_${i}`)).join(' && ')})`;
+  if (d.or) return `(${d.or.map((x, i) => buildDiscriminatorTest(x, `${varPrefix}_${i}`)).join(' || ')})`;
+  if (d.not) return `!(${buildDiscriminatorTest(d.not, `${varPrefix}_n`)})`;
   const { maxCount, ...test } = d.constraints;
-  if (maxCount === 0) return `NOT EXISTS { ${filterPattern({ ...d, constraints: test }, varPrefix)} }`;
-  return `EXISTS { ${filterPattern(d, varPrefix)} }`;
+  if (maxCount === 0) return `NOT EXISTS { ${buildFilterPattern({ ...d, constraints: test }, varPrefix)} }`;
+  return `EXISTS { ${buildFilterPattern(d, varPrefix)} }`;
 }
 
 // Writes out every hop as its own triple pattern.
 // Forward:  ?s <p1> ?f0_1 . ?f0_1 <p2> ?f0_v
 // Inverse:  ?s ^<p1> → ?f0_1 <p1> ?s
-export function hopsPattern(hops, varPrefix, startVar, lastVar = `?${varPrefix}_v`) {
+export function buildHopsPattern(hops, varPrefix, startVar, lastVar = `?${varPrefix}_v`) {
   let prev = startVar;
   const patterns = [];
   for (let i = 0; i < hops.length; i++) {
@@ -77,23 +77,23 @@ export function hopsPattern(hops, varPrefix, startVar, lastVar = `?${varPrefix}_
 // One filter: its condition, plus its rep:where conditions on the nodes it
 // walks through. With sh:maxCount 0 the whole of it becomes "none such";
 // with a value test too (sh:in, sh:hasValue, ...), "none with such a value".
-function filterPattern(filter, varPrefix) {
+function buildFilterPattern(filter, varPrefix) {
   const { maxCount, ...test } = filter.constraints;
   if (maxCount === 0) {
-    return `FILTER NOT EXISTS {\n    ${filterPattern({ ...filter, constraints: test }, varPrefix)}\n  }`;
+    return `FILTER NOT EXISTS {\n    ${buildFilterPattern({ ...filter, constraints: test }, varPrefix)}\n  }`;
   }
   const nodeVar = (k) => (k === filter.path.length ? `?${varPrefix}_v` : `?${varPrefix}_${k}`);
-  const wheres = wherePatterns(filter.where, filter.path, nodeVar, varPrefix);
-  return [conditionPattern(filter.constraints, varPrefix, filter.path, '?s'), ...wheres].join('\n  ');
+  const wheres = buildWherePatterns(filter.where, filter.path, nodeVar, varPrefix);
+  return [buildConditionPattern(filter.constraints, varPrefix, filter.path, '?s'), ...wheres].join('\n  ');
 }
 
 // The rep:where conditions of a filter or column. Each starts at the node
 // after the steps it shares with its host; nodeVar(k) names that node in the
 // host's own query.
-export function wherePatterns(where, hostHops, nodeVar, varPrefix) {
+export function buildWherePatterns(where, hostHops, nodeVar, varPrefix) {
   return (where || []).map((w, wi) => {
-    const k = sharedSteps(hostHops, w.path);
-    return conditionPattern(w.constraints, `${varPrefix}_w${wi}`, w.path.slice(k), nodeVar(k));
+    const k = countSharedSteps(hostHops, w.path);
+    return buildConditionPattern(w.constraints, `${varPrefix}_w${wi}`, w.path.slice(k), nodeVar(k));
   });
 }
 
@@ -101,13 +101,13 @@ export function wherePatterns(where, hostHops, nodeVar, varPrefix) {
 // filter starts at ?s; a rep:where starts at a node of its host and, with no
 // hops left, tests that node itself. sh:maxCount 0 means "none such", so its
 // hops and any value test only live inside the NOT EXISTS.
-function conditionPattern(c, varPrefix, hops, startVar) {
+function buildConditionPattern(c, varPrefix, hops, startVar) {
   if (c.maxCount === 0) {
     const { maxCount, ...test } = c;
-    return `FILTER NOT EXISTS { ${conditionPattern(test, varPrefix + '_nex', hops, startVar)} }`;
+    return `FILTER NOT EXISTS { ${buildConditionPattern(test, varPrefix + '_nex', hops, startVar)} }`;
   }
   const v = hops.length ? `?${varPrefix}_v` : startVar;
-  const parts = hops.length ? [hopsPattern(hops, varPrefix, startVar)] : [];
+  const parts = hops.length ? [buildHopsPattern(hops, varPrefix, startVar)] : [];
 
   if (c.hasValue) parts.push(`FILTER(${v} = ${escapeTerm(c.hasValue)})`);
   if (c.in) parts.push(`FILTER(${v} IN (${c.in.map(escapeTerm).join(', ')}))`);
@@ -127,7 +127,7 @@ function conditionPattern(c, varPrefix, hops, startVar) {
   if (c.minCount === 2) {
     // two distinct leaf values: the same path again, to a second leaf
     const w = `?${varPrefix}_w`;
-    parts.push(hopsPattern(hops, `${varPrefix}_2`, startVar, w));
+    parts.push(buildHopsPattern(hops, `${varPrefix}_2`, startVar, w));
     parts.push(`FILTER(${v} != ${w})`);
   }
   return parts.join('\n  ');

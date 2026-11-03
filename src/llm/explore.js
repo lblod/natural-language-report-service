@@ -1,6 +1,6 @@
 // Everything the LLM reads from the database: the code lists, inlined in
 // describe_profile and searched by lookup_values. Every read goes through
-// publicQuery: the service scope, not the caller's session. The app grants
+// queryPublic: the service scope, not the caller's session. The app grants
 // that scope the public graph only, so the LLM reads public data, the same
 // for every caller, and never what a report would show. Nothing here counts
 // or runs a spec.
@@ -16,19 +16,19 @@ const LOOKUP_LIMIT = 25;
 // they rarely change.
 const cache = new Map();
 
-function publicQuery(q) {
+function queryPublic(q) {
   return query(q, { scope: SERVICE_SCOPE });
 }
 
 // Up to INLINE_VALUES_MAX values [{ uri, label }] of a code list, cached for
 // VALUES_TTL. Empty when the read fails; the LLM then uses rep:anyOf with
 // words.
-export async function codeList(type) {
+export async function fetchCodeList(type) {
   const hit = cache.get(type);
   if (hit && Date.now() - hit.at < VALUES_TTL) return hit.values;
   let values = [];
   try {
-    const r = await publicQuery(`SELECT ?uri ?label WHERE {
+    const r = await queryPublic(`SELECT ?uri ?label WHERE {
     ?uri a <${type}> .
     OPTIONAL { ?uri <http://www.w3.org/2004/02/skos/core#prefLabel> ?label . }
   } ORDER BY ?label LIMIT ${INLINE_VALUES_MAX + 1}`);
@@ -52,10 +52,10 @@ export async function lookupValues(profile, field, term) {
 
   // Search within the class first. A common word ("gemeente") also sits in
   // hundreds of unrelated labels; an unscoped scan drowns the code.
-  let rows = await labelQuery(term, type);
+  let rows = await queryLabels(term, type);
   // A code list may type its entries differently than the profile says. Then
   // scan every label in the public graph.
-  if (!rows.length) rows = await labelQuery(term, null);
+  if (!rows.length) rows = await queryLabels(term, null);
   // "Gent" must surface before "AGB Erfgoed Gent".
   const lower = term.toLowerCase();
   const exactRow = rows.find(r => r.label.toLowerCase() === lower);
@@ -69,13 +69,13 @@ export async function lookupValues(profile, field, term) {
 }
 
 // Regex on str(?label), so language-tagged labels match.
-async function labelQuery(term, type) {
+async function queryLabels(term, type) {
   const q = `SELECT DISTINCT ?uri ?label WHERE {
     ?uri a ${type ? `<${type}>` : '?anyType'} ;
          <http://www.w3.org/2004/02/skos/core#prefLabel> ?label .
     FILTER(REGEX(str(?label), ${sparqlEscapeString(escapeRegex(term))}, "i"))
   } ORDER BY ?label LIMIT ${LOOKUP_LIMIT * 8}`;
-  const r = await publicQuery(q);
+  const r = await queryPublic(q);
   return r.results.bindings.map(b => ({ label: b.label.value, uri: b.uri.value }));
 }
 
