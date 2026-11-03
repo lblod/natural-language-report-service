@@ -21,6 +21,10 @@ const MESSAGE_BASE = 'http://data.lblod.info/id/chat-messages/';
 const FILE_BASE = 'http://data.lblod.info/files/';
 const REPORT_BASE = 'http://data.lblod.info/id/reports/';
 const WRITE_SCOPE = process.env.WRITE_SCOPE;
+// The agent that signs the assistant's messages, seeded by the portal's
+// chat-assistant migration. It is also the source (prov:wasAttributedTo) of
+// every spec and report the service writes, never a person.
+export const CHAT_ASSISTANT_URI = process.env.CHAT_ASSISTANT_URI || 'http://data.lblod.info/id/chat-agents/report-assistant';
 
 export const SPEC_MEDIA_TYPE = 'text/turtle';
 // The bijlage types. Match the add-chat-attachment-types-codelist migration
@@ -140,8 +144,8 @@ export async function writeMessage({ conversationUri, content, maker, attachment
 // creation time, dct:isPartOf its conversation and prov:generated its
 // Turtle file (the spec bijlage). The CSV belongs to the report, which
 // links here with dct:conformsTo. The Turtle file is what the spec tab
-// downloads and what runs again later, outside the chat. Returns the spec
-// uri.
+// downloads and what runs again later, outside the chat. Its source
+// (prov:wasAttributedTo) is the assistant agent. Returns the spec uri.
 export async function registerReportSpec(title, description, conversationUri, specFileUri) {
   const id = uuid();
   const spec = `${REPORT_BASE}${id}`;
@@ -156,7 +160,8 @@ export async function registerReportSpec(title, description, conversationUri, sp
       ${sparqlEscapeUri(spec)} a ${sparqlEscapeUri(REPORT_SPEC_CLASS)} ;
         mu:uuid ${sparqlEscapeString(id)} ;
         dct:title ${sparqlEscapeString(title)} ;
-        ${descriptionLine}dct:created ${sparqlEscapeDateTime(new Date())} ;
+        ${descriptionLine}prov:wasAttributedTo ${sparqlEscapeUri(CHAT_ASSISTANT_URI)} ;
+        dct:created ${sparqlEscapeDateTime(new Date())} ;
         ${conversationLine}prov:generated ${sparqlEscapeUri(specFileUri)} .
     }`, { scope: WRITE_SCOPE });
   return spec;
@@ -165,47 +170,23 @@ export async function registerReportSpec(title, description, conversationUri, sp
 // The report of one run, pointing at the logical file of its CSV, so it
 // shows up in the reports list. The description is the short Dutch text
 // written from the conversation. The report conforms to its ReportSpec
-// (dct:conformsTo); a spec that runs again gets one report per run.
-// creatorUri is the person who ran the spec, recorded with
-// prov:wasAttributedTo. Absent (no session resolved), no attribution line.
-export async function registerReport(title, fileUri, description, specUri, creatorUri) {
+// (dct:conformsTo); a spec that runs again gets one report per run. Its
+// source (prov:wasAttributedTo) is the assistant agent, also on a re-run.
+export async function registerReport(title, fileUri, description, specUri) {
   const id = uuid();
   const descriptionLine = description
     ? `dct:description ${sparqlEscapeString(description)} ;\n        `
-    : '';
-  const creatorLine = creatorUri
-    ? `prov:wasAttributedTo ${sparqlEscapeUri(creatorUri)} ;\n        `
     : '';
   await update(`${PREFIXES}
     INSERT DATA {
       ${sparqlEscapeUri(`${REPORT_BASE}${id}`)} a ${sparqlEscapeUri(REPORT_CLASS)} ;
         mu:uuid ${sparqlEscapeString(id)} ;
         dct:title ${sparqlEscapeString(title)} ;
-        ${descriptionLine}${creatorLine}dct:created ${sparqlEscapeDateTime(new Date())} ;
+        ${descriptionLine}prov:wasAttributedTo ${sparqlEscapeUri(CHAT_ASSISTANT_URI)} ;
+        dct:created ${sparqlEscapeDateTime(new Date())} ;
         prov:generated ${sparqlEscapeUri(fileUri)} ;
         dct:conformsTo ${sparqlEscapeUri(specUri)} .
     }`, { scope: WRITE_SCOPE });
-}
-
-// The person for the caller's session, from the session's account:
-// <session> session:account ?account, ?person foaf:account ?account. Or null
-// when the session has no account (or the caller may not read the sessions
-// graph). sessionUri is http://mu.semte.ch/sessions/<mu-session-id>, built
-// by the route from the mu-session-id header.
-export async function readSessionMaker(sessionUri) {
-  const result = await query(`${PREFIXES}
-    SELECT ?person WHERE {
-      ${sparqlEscapeUri(sessionUri)} session:account ?account .
-      ?person foaf:account ?account .
-    } LIMIT 1`);
-  return result.results.bindings[0]?.person?.value ?? null;
-}
-
-// The session uri of the incoming request, from the mu-session-id header
-// that mu-identifier sets. Or null without the header.
-export function getSessionUri(req) {
-  const sessionId = req.get('mu-session-id');
-  return sessionId ? `http://mu.semte.ch/sessions/${sessionId}` : null;
 }
 
 // The ReportSpec with this uuid as { uri, title, description, specFileName },

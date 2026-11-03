@@ -202,7 +202,7 @@ lists.
 | `SHARE_DIR` | `/share` | where CSVs and specs are written |
 | `SERVICE_SCOPE` | `http://services.semantic.works/natural-language-report` | scope of the code-list reads |
 | `WRITE_SCOPE` | | scope of the report and file writes and of the conversation delete. Unset, no scope is sent. |
-| `CHAT_ASSISTANT_URI` | `http://data.lblod.info/id/chat-agents/report-assistant` | agent that signs the answers |
+| `CHAT_ASSISTANT_URI` | `http://data.lblod.info/id/chat-agents/report-assistant` | agent that signs the answers and is the source (`prov:wasAttributedTo`) of every spec and report |
 | `CHAT_HISTORY_LIMIT` | `20` | messages of history a turn reads |
 | `REPORT_CLASS` | `http://lblod.data.gift/vocabularies/reporting/Report` | type of the report resource |
 | `CSV_SEPARATOR` | `;` | CSV column separator |
@@ -259,8 +259,8 @@ or no longer checks out. A failed run is only logged.
 | `sioc:Thread` | a conversation, made by the frontend |
 | `sioc:Post`, `sioct:InstantMessage` | a message: `sioc:content`, `foaf:maker`, `as:attachment` to its bijlagen |
 | `nfo:FileDataObject` | a bijlage; `dct:type` says spec or executed report |
-| `reporting:Report` | one per run, in the chat or from `POST /assistant/report-specs/:id/run`; `dct:title`, a Dutch `dct:description` of at most 300 characters, `prov:generated` to the CSV, and `dct:conformsTo` its spec |
-| `reporting:ReportSpec` | the spec of one run in the chat; the same title, description and creation time, `dct:isPartOf` its conversation, and `prov:generated` to its Turtle file (the spec bijlage). Its reports link to it, not the other way round. |
+| `reporting:Report` | one per run, in the chat or from `POST /assistant/report-specs/:id/run`; `dct:title`, a Dutch `dct:description` of at most 300 characters, `prov:generated` to the CSV, `dct:conformsTo` its spec, and `prov:wasAttributedTo` the assistant agent (`CHAT_ASSISTANT_URI`), also on a re-run |
+| `reporting:ReportSpec` | the spec of one run in the chat; the same title, description and creation time, `dct:isPartOf` its conversation, `prov:generated` to its Turtle file (the spec bijlage), and `prov:wasAttributedTo` the assistant agent. Its reports link to it, not the other way round. |
 
 The two bijlage types:
 

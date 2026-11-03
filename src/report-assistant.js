@@ -77,9 +77,7 @@ export async function executeSpec({ spec, attachment }, conversation, profiles, 
     const specFile = await registerFile(attachment.name, SPEC_MEDIA_TYPE, SPEC_TYPE);
 
     const specUri = await registerReportSpec(spec.title, description, conversation.uri, specFile);
-    // The conversation's maker ran the spec: conversations are per user, so
-    // it is also the caller.
-    await registerReport(spec.title, csvFile, description, specUri, conversation.creator);
+    await registerReport(spec.title, csvFile, description, specUri);
 
     return { text: TEXT.executed, attachments: [csvFile, specFile] };
   } catch (e) {
@@ -106,13 +104,12 @@ export function prepareSavedSpec(reportSpec, profiles) {
 
 // Runs a prepared saved spec again as the user, outside the chat, and
 // records a new report that conforms to the same ReportSpec. No LLM: the
-// new report keeps the ReportSpec's description. creatorUri is the person
-// who runs it, from the route's session. Throws when the run fails.
-export async function executeSavedSpec(spec, reportSpec, profiles, creatorUri) {
+// new report keeps the ReportSpec's description. Throws when the run fails.
+export async function executeSavedSpec(spec, reportSpec, profiles) {
   const shareName = `${uuid()}.csv`;
   writeShareFile(shareName, await runReport(spec, profiles.get(spec.profileUri)));
   const csvFile = await registerFile(shareName, 'text/csv', RESULT_TYPE, `${slugify(spec.title)}.csv`);
-  await registerReport(spec.title, csvFile, reportSpec.description, reportSpec.uri, creatorUri);
+  await registerReport(spec.title, csvFile, reportSpec.description, reportSpec.uri);
 }
 
 // The newest spec bijlage in the history, or null. The agreed spec is the

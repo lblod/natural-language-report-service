@@ -1,15 +1,12 @@
 import { app, errorHandler } from 'mu';
 import bodyParser from 'body-parser';
 import { loadProfiles } from './src/runner/profile.js';
-import { readConversation, readHistory, writeMessage, deleteConversation, readReportSpec, readSessionMaker, getSessionUri } from './src/chat.js';
+import { readConversation, readHistory, writeMessage, deleteConversation, readReportSpec, CHAT_ASSISTANT_URI } from './src/chat.js';
 import { wantsExecution } from './src/llm/mode.js';
 import { describeReport } from './src/llm/summary.js';
 import { prepareExecution, executeSpec, refineSpec, prepareSavedSpec, executeSavedSpec } from './src/report-assistant.js';
 
 const PROFILE_DIR = process.env.PROFILE_DIR || '/config/profiles';
-// The agent that signs the assistant's messages, seeded by the portal's
-// chat-assistant migration.
-const CHAT_ASSISTANT_URI = process.env.CHAT_ASSISTANT_URI || 'http://data.lblod.info/id/chat-agents/report-assistant';
 const TITLE_LENGTH = 80;
 const FAILED = 'Er ging iets mis. Probeer het opnieuw.';
 
@@ -119,13 +116,7 @@ app.post('/assistant/report-specs/:id/run', async function(req, res) {
   res.status(202).send();
 
   try {
-    // A missing or unresolvable session person must not stop the run: the
-    // report is then written with no prov:wasAttributedTo.
-    const creator = await readSessionMaker(getSessionUri(req)).catch(e => {
-      console.error('[reports] could not resolve the session user:', e);
-      return null;
-    });
-    await executeSavedSpec(prepared.spec, reportSpec, profiles, creator);
+    await executeSavedSpec(prepared.spec, reportSpec, profiles);
     console.log(`[reports] ran report spec ${req.params.id}`);
   } catch (e) {
     console.error(`[reports] run of report spec ${req.params.id} failed:`, e);
