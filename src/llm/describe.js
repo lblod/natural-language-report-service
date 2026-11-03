@@ -1,5 +1,5 @@
 // A profile as a plain text menu: entities, fields, code lists. Code lists up
-// to INLINE_VALUES_MAX are inlined (and cached), so the LLM never has to
+// to INLINE_VALUES_MAX are inlined, so the LLM never has to
 // search the short ones.
 import { fetchCodeList, INLINE_VALUES_MAX } from './explore.js';
 
@@ -27,7 +27,8 @@ In sh:path, use the predicate URI shown after each field name, not the field nam
 An inverse hop (the field shows "(inverse)") goes in the list as [ sh:inversePath <predicate> ] .
 When two entities share one sh:targetClass, pick one with rep:entity <the URI after the entity>.
 A field that links to several entities ("→ a or b") reaches all of them; the steps after it decide. To keep one kind, add a rep:where on a step only that kind has.
-A date filter is sh:minInclusive or sh:maxInclusive with "yyyy-mm-dd"^^xsd:dateTime
+A date filter is sh:minInclusive or sh:maxInclusive with "yyyy-mm-ddThh:mm:ss"^^xsd:dateTime.
+The time is required: T00:00:00 starts a day, T23:59:59 ends it.
 (the xsd prefix above is not copied: add @prefix xsd: <http://www.w3.org/2001/XMLSchema#>).
 `];
   for (const shape of profile.shapes) {

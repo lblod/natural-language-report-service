@@ -25,7 +25,10 @@ Reply with exactly one token: true or false. No other words, no punctuation,
 no markdown.`;
 
 // True when the user's last message says "run it now". turns: [{ role,
-// content }], newest last; the last few are enough.
+// content }], newest last; the last few are enough. Only `content` is the
+// answer: reasoning_content and the like are the model's thinking, and a
+// thought that starts with "true" must not run a report. Empty content
+// means refine.
 export async function wantsExecution(turns) {
   let message;
   try {
@@ -35,19 +38,7 @@ export async function wantsExecution(turns) {
     // report on a guess, and the refine loop will surface the real error.
     return false;
   }
-  return stripMarkdown(readFirstText(message)).trim().toLowerCase().startsWith('true');
-}
-
-// Reasoning models may leave `content` empty, or not answer at all when the
-// thinking burned the token budget. Then take the first non-empty field of
-// reasoning_content, reasoning and thinking. Those may hold the model's
-// thinking rather than its answer.
-function readFirstText(message) {
-  for (const key of ['content', 'reasoning_content', 'reasoning', 'thinking']) {
-    const v = message?.[key];
-    if (typeof v === 'string' && v.trim()) return v;
-  }
-  return '';
+  return stripMarkdown(message?.content || '').trim().toLowerCase().startsWith('true');
 }
 
 // Markdown marks out, so "**true**" still reads as true.

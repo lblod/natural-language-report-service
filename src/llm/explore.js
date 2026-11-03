@@ -9,12 +9,7 @@ import { query, sparqlEscapeString } from 'mu';
 // Must match the with-scope grant in the app's config.lisp.
 const SERVICE_SCOPE = process.env.SERVICE_SCOPE || 'http://services.semantic.works/natural-language-report';
 export const INLINE_VALUES_MAX = Number(process.env.INLINE_VALUES_MAX || 50);
-const VALUES_TTL = Number(process.env.VALUES_TTL || 3600) * 1000;
 const LOOKUP_LIMIT = 25;
-
-// class → { values, at }. Every prompt with a menu needs the code lists, and
-// they rarely change.
-const cache = new Map();
 
 // Every read of the LLM goes through here, under the service scope: public
 // data only, the same for every caller.
@@ -22,12 +17,10 @@ function queryPublic(q) {
   return query(q, { scope: SERVICE_SCOPE });
 }
 
-// Up to INLINE_VALUES_MAX values [{ uri, label }] of a code list, cached for
-// VALUES_TTL. Empty when the read fails, and that empty result is cached
-// too; the LLM then uses rep:anyOf with words.
+// Up to INLINE_VALUES_MAX values [{ uri, label }] of a code list, read fresh
+// on every call. Empty when the read fails; the LLM then uses rep:anyOf with
+// words.
 export async function fetchCodeList(type) {
-  const hit = cache.get(type);
-  if (hit && Date.now() - hit.at < VALUES_TTL) return hit.values;
   let values = [];
   try {
     const r = await queryPublic(`SELECT ?uri ?label WHERE {
@@ -41,7 +34,6 @@ export async function fetchCodeList(type) {
   } catch {
     values = [];
   }
-  cache.set(type, { values, at: Date.now() });
   return values;
 }
 

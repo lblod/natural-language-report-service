@@ -206,7 +206,6 @@ lists.
 | `ROW_LIMIT` | `200000` | a report with more rows fails, it is never cut |
 | `MAX_PATH_DEPTH` | `8` | longest path in a spec |
 | `INLINE_VALUES_MAX` | `50` | code lists up to this size are shown to the LLM in full |
-| `VALUES_TTL` | `3600` | seconds the code lists are cached |
 | `SEED_PAGE_SIZE` | `5000` | page size when the run fetches the rows |
 | `SUBJECT_CHUNK_SIZE` | `100` | rows per column query; lower it when the database refuses long queries |
 | `MAX_ROUNDS` | `12` | LLM calls per turn while it writes a spec |

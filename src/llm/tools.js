@@ -22,7 +22,7 @@ export const TOOLS = [
     'Return the Turtle of a spec bijlage, a ttl file attached to an earlier message in this conversation. The current spec already comes with the user\'s message; use this only when the user asks for an older spec. Read-only.',
     { file_name: 'The file name of the spec bijlage, e.g. specificatie-<uuid>.ttl' }),
   defineTool('lookup_values',
-    'Search a code list for a term so you can suggest concrete values for a filter (for sh:hasValue or sh:in). Returns up to 25 matches with their URIs and labels, a total, and an exact flag when a label equals the term. Reads candidate values only; it never runs the spec and never tells you how many subjects a spec would match. Read-only, no report is created.',
+    'Search a code list for a term so you can suggest concrete values for a filter (for sh:hasValue or sh:in). Returns up to 25 matches with their URIs and labels, a note when there may be more, and an exact flag when a label equals the term. Reads candidate values only; it never runs the spec and never tells you how many subjects a spec would match. Read-only, no report is created.',
     {
       profile_id: 'The profile URI from the profile list',
       field: 'The field as "entityLabel.fieldLabel", e.g. "bestuurseenheid.naam"',
