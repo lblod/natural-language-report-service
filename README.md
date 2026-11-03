@@ -82,6 +82,20 @@ sparql-parser:
 Do not set `DEFAULT_MU_AUTH_SCOPE`: it would scope every query, the report
 run too.
 
+The service writes reports and files without naming a graph, so they land in
+every graph the user may write that accepts those types. To keep them in one
+graph, set `WRITE_SCOPE`. The service then writes reports and files under that
+scope, still as the user, and only the grants inside that scope apply. Use
+another scope than `SERVICE_SCOPE`, or the LLM's code-list reads could reach
+the user's chat. For example, one graph per user:
+
+```lisp
+(with-scope "http://services.semantic.works/natural-language-report/chat"
+  (grant (read write)
+    :to-graph chat
+    :for-allowed-group "report-assistant-user"))
+```
+
 ## Tutorial: a first report
 
 We add a small profile and run one report on it.
@@ -158,7 +172,9 @@ picks one of two modes.
   and checks it again. Right before the run, one LLM call writes the report's
   `dct:description` from the conversation, never from report data. The
   service runs the spec as the user, writes the CSV to the share and records
-  a `reporting:Report`. The answer is a fixed text with the CSV and the spec.
+  a `reporting:Report` and a `reporting:ReportSpec`. The report links to the
+  spec with `dct:conformsTo`. The answer is a fixed text with the CSV and the
+  spec.
   No spec, a spec that no longer checks out or a failed run each give a fixed
   failure text.
 
@@ -182,7 +198,8 @@ lists.
 | `PROFILE_DIR` | `/config/profiles` | folder with the profiles, one `.ttl` file each |
 | `SHARE_DIR` | `/share` | where CSVs and specs are written |
 | `SERVICE_SCOPE` | `http://services.semantic.works/natural-language-report` | scope of the code-list reads |
-| `CHAT_ASSISTANT_URI` | `http://data.lblod.info/id/chat-agents/rapportassistent` | agent that signs the answers |
+| `WRITE_SCOPE` | | scope of the report and file writes. Unset, no scope is sent. |
+| `CHAT_ASSISTANT_URI` | `http://data.lblod.info/id/chat-agents/report-assistant` | agent that signs the answers |
 | `CHAT_HISTORY_LIMIT` | `20` | messages of history a turn reads |
 | `REPORT_CLASS` | `http://lblod.data.gift/vocabularies/reporting/Report` | type of the report resource |
 | `CSV_SEPARATOR` | `;` | CSV column separator |
@@ -228,7 +245,8 @@ read the conversation.
 | `sioc:Thread` | a conversation, made by the frontend |
 | `sioc:Post`, `sioct:InstantMessage` | a message: `sioc:content`, `foaf:maker`, `as:attachment` to its bijlagen |
 | `nfo:FileDataObject` | a bijlage; `dct:type` says spec or executed report |
-| `reporting:Report` | one per run; `dct:title`, a Dutch `dct:description` of at most 300 characters, and `prov:generated` to the CSV |
+| `reporting:Report` | one per run; `dct:title`, a Dutch `dct:description` of at most 300 characters, `prov:generated` to the CSV, and `dct:conformsTo` its spec |
+| `reporting:ReportSpec` | the spec of one run; the same title, description and creation time, and `prov:generated` to the CSV |
 
 The two bijlage types:
 

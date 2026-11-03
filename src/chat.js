@@ -1,6 +1,11 @@
 // The chat's reads and writes: conversations, messages, their bijlagen and
 // the reports. Everything runs as the caller.
 //
+// Reports and files are written under WRITE_SCOPE when it is set. The app
+// decides which graphs that scope may write, for example only the caller's
+// own graph, so these types do not also land in other graphs the caller can
+// write. Unset, no scope is sent.
+//
 // A bijlage is a real file: a logical nfo:FileDataObject the file service
 // serves at /files/<uuid>/download, over a physical share:// object with
 // nie:dataSource back to the logical one.
@@ -10,10 +15,12 @@ import { query, update, uuid,
 
 const HISTORY_LIMIT = Number(process.env.CHAT_HISTORY_LIMIT || 20);
 const REPORT_CLASS = process.env.REPORT_CLASS || 'http://lblod.data.gift/vocabularies/reporting/Report';
+const REPORT_SPEC_CLASS = 'http://lblod.data.gift/vocabularies/reporting/ReportSpec';
 const SHARE_DIR = process.env.SHARE_DIR || '/share';
 const MESSAGE_BASE = 'http://data.lblod.info/id/chat-messages/';
 const FILE_BASE = 'http://data.lblod.info/files/';
 const REPORT_BASE = 'http://data.lblod.info/id/reports/';
+const WRITE_SCOPE = process.env.WRITE_SCOPE;
 
 export const SPEC_MEDIA_TYPE = 'text/turtle';
 // The bijlage types. Match the add-chat-attachment-types-codelist migration
@@ -126,20 +133,32 @@ export async function writeMessage({ conversationUri, content, maker, attachment
 }
 
 // The report of one run, pointing at the logical file of its CSV. The
-// description is the short Dutch text written from the conversation.
+// description is the short Dutch text written from the conversation. The
+// report conforms to a ReportSpec that carries the same metadata.
 export async function registerReport(title, fileUri, description) {
   const id = uuid();
+  const specId = uuid();
+  const now = new Date();
+  const report = sparqlEscapeUri(`${REPORT_BASE}${id}`);
+  const spec = sparqlEscapeUri(`${REPORT_BASE}${specId}`);
   const descriptionLine = description
     ? `dct:description ${sparqlEscapeString(description)} ;\n        `
     : '';
   await update(`${PREFIXES}
     INSERT DATA {
-      ${sparqlEscapeUri(`${REPORT_BASE}${id}`)} a ${sparqlEscapeUri(REPORT_CLASS)} ;
+      ${report} a ${sparqlEscapeUri(REPORT_CLASS)} ;
         mu:uuid ${sparqlEscapeString(id)} ;
         dct:title ${sparqlEscapeString(title)} ;
-        ${descriptionLine}dct:created ${sparqlEscapeDateTime(new Date())} ;
+        ${descriptionLine}dct:created ${sparqlEscapeDateTime(now)} ;
+        prov:generated ${sparqlEscapeUri(fileUri)} ;
+        dct:conformsTo ${spec} .
+
+      ${spec} a ${sparqlEscapeUri(REPORT_SPEC_CLASS)} ;
+        mu:uuid ${sparqlEscapeString(specId)} ;
+        dct:title ${sparqlEscapeString(title)} ;
+        ${descriptionLine}dct:created ${sparqlEscapeDateTime(now)} ;
         prov:generated ${sparqlEscapeUri(fileUri)} .
-    }`);
+    }`, { scope: WRITE_SCOPE });
 }
 
 export function writeShareFile(fileName, content) {

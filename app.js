@@ -9,7 +9,7 @@ import { prepareExecution, executeSpec, refineSpec } from './src/report-assistan
 const PROFILE_DIR = process.env.PROFILE_DIR || '/config/profiles';
 // The agent that signs the assistant's messages, seeded by the portal's
 // chat-assistant migration.
-const CHAT_ASSISTANT_URI = process.env.CHAT_ASSISTANT_URI || 'http://data.lblod.info/id/chat-agents/rapportassistent';
+const CHAT_ASSISTANT_URI = process.env.CHAT_ASSISTANT_URI || 'http://data.lblod.info/id/chat-agents/report-assistant';
 const TITLE_LENGTH = 80;
 const FAILED = 'Er ging iets mis. Probeer het opnieuw.';
 
