@@ -27,7 +27,8 @@ export async function fetchSubjects(spec, shape) {
 
 // One page of subjects: the class, the shape's discriminators and the
 // spec's filters in one SELECT. The validator made sure spec.targetClass is
-// the class of shape.
+// the class of shape. ORDER BY ?s: without it SPARQL promises no order, so
+// two pages could overlap or skip a subject.
 function buildSeedPageQuery(spec, shape, limit, offset) {
   const parts = [`?s a ${sparqlEscapeUri(spec.targetClass)} .`];
   shape.discriminators.forEach((d, di) => {
@@ -39,6 +40,7 @@ function buildSeedPageQuery(spec, shape, limit, offset) {
   return `SELECT DISTINCT ?s WHERE {
   ${parts.join('\n  ')}
 }
+ORDER BY ?s
 LIMIT ${limit} OFFSET ${offset}`;
 }
 
