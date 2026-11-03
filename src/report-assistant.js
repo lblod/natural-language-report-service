@@ -8,13 +8,16 @@
 // goes straight to the runner. The answer is fixed text, also when the run
 // fails: nothing is retried and no spec is rewritten. The caller writes the
 // report's description right before the run, so execution holds no LLM call.
+//
+// A saved spec can also run again outside the chat: prepareSavedSpec and
+// executeSavedSpec, for the report spec tab.
 import { uuid } from 'mu';
 import { ask } from './llm/loop.js';
 import { parseSpec } from './runner/spec.js';
 import { checkSpec } from './runner/check.js';
 import { runReport } from './runner/run.js';
 import { storeSpecFile, readSpecFile, writeShareFile, registerFile, registerReport,
-         SPEC_MEDIA_TYPE, SPEC_TYPE, RESULT_TYPE } from './chat.js';
+         registerReportSpec, SPEC_MEDIA_TYPE, SPEC_TYPE, RESULT_TYPE } from './chat.js';
 
 const TEXT = {
   executed: 'Het rapport is uitgevoerd. De bijlagen staan erbij.',
@@ -68,16 +71,48 @@ export async function executeSpec({ spec, attachment }, conversation, profiles, 
     const shareName = `${uuid()}.csv`;
     writeShareFile(shareName, await runReport(spec, profiles.get(spec.profileUri)));
     const csvFile = await registerFile(shareName, 'text/csv', RESULT_TYPE, `${slugify(conversation.title)}.csv`);
-    await registerReport(spec.title, csvFile, description, conversation.uri);
 
     // Same physical spec file, registered as a bijlage for this message.
+    // The ReportSpec points at it, so the spec can run again later.
     const specFile = await registerFile(attachment.name, SPEC_MEDIA_TYPE, SPEC_TYPE);
+
+    const specUri = await registerReportSpec(spec.title, description, conversation.uri, specFile);
+    // The conversation's maker ran the spec: conversations are per user, so
+    // it is also the caller.
+    await registerReport(spec.title, csvFile, description, specUri, conversation.creator);
 
     return { text: TEXT.executed, attachments: [csvFile, specFile] };
   } catch (e) {
     console.error('[reports] execution failed:', e);
     return { text: TEXT.failed };
   }
+}
+
+// A saved ReportSpec, ready to run again: its Turtle file read, parsed and
+// checked against the profiles as they are now. Returns { spec }, or
+// { error } with one sentence saying why it cannot run. The route calls it
+// before its 202, so the user hears that at once.
+export function prepareSavedSpec(reportSpec, profiles) {
+  const content = readSpecFile(reportSpec.specFileName);
+  if (!content) return { error: 'this report spec has no spec file' };
+  try {
+    const spec = parseSpec(content);
+    const error = checkSpec(spec, profiles);
+    return error ? { error } : { spec };
+  } catch (e) {
+    return { error: `the spec file did not parse: ${e.message}` };
+  }
+}
+
+// Runs a prepared saved spec again as the user, outside the chat, and
+// records a new report that conforms to the same ReportSpec. No LLM: the
+// new report keeps the ReportSpec's description. creatorUri is the person
+// who runs it, from the route's session. Throws when the run fails.
+export async function executeSavedSpec(spec, reportSpec, profiles, creatorUri) {
+  const shareName = `${uuid()}.csv`;
+  writeShareFile(shareName, await runReport(spec, profiles.get(spec.profileUri)));
+  const csvFile = await registerFile(shareName, 'text/csv', RESULT_TYPE, `${slugify(spec.title)}.csv`);
+  await registerReport(spec.title, csvFile, reportSpec.description, reportSpec.uri, creatorUri);
 }
 
 // The newest spec bijlage in the history, or null. The agreed spec is the

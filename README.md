@@ -85,7 +85,10 @@ run too.
 The service writes reports and files without naming a graph, so they land in
 every graph the user may write that accepts those types. To keep them in one
 graph, set `WRITE_SCOPE`. The service then writes reports and files under that
-scope, still as the user, and only the grants inside that scope apply. Use
+scope, still as the user, and only the grants inside that scope apply. The
+conversation delete runs under it too: without a scope, sparql-parser 0.0.15
+deletes a triple in only one of the graphs that accept its type, which may
+not be the graph it is in. Use
 another scope than `SERVICE_SCOPE`, or the LLM's code-list reads could reach
 the user's chat. For example, one graph per user:
 
@@ -198,7 +201,7 @@ lists.
 | `PROFILE_DIR` | `/config/profiles` | folder with the profiles, one `.ttl` file each |
 | `SHARE_DIR` | `/share` | where CSVs and specs are written |
 | `SERVICE_SCOPE` | `http://services.semantic.works/natural-language-report` | scope of the code-list reads |
-| `WRITE_SCOPE` | | scope of the report and file writes. Unset, no scope is sent. |
+| `WRITE_SCOPE` | | scope of the report and file writes and of the conversation delete. Unset, no scope is sent. |
 | `CHAT_ASSISTANT_URI` | `http://data.lblod.info/id/chat-agents/report-assistant` | agent that signs the answers |
 | `CHAT_HISTORY_LIMIT` | `20` | messages of history a turn reads |
 | `REPORT_CLASS` | `http://lblod.data.gift/vocabularies/reporting/Report` | type of the report resource |
@@ -224,9 +227,21 @@ frontend polls the conversation for it.
 
 #### DELETE /assistant/conversations/:id
 
-Deletes the conversation, its messages, their bijlagen (triples and files)
-and the reports of those files. Answers `204`, or `404` when the user cannot
-read the conversation.
+Deletes the conversation, its messages, its report specs and the spec
+bijlagen (triples and files). The reports stay, with their CSV, also the
+reports of later runs of its specs; their `dct:conformsTo` then points at a
+deleted spec. Answers `204`, or `404` when the user cannot read the
+conversation.
+
+#### POST /assistant/report-specs/:id/run
+
+No body. Runs a saved `reporting:ReportSpec` again, outside the chat, as the
+user. The service reads the spec's Turtle file and checks it against the
+profiles, then answers `202`. The run goes on in the background and records
+a new `reporting:Report` that conforms to the same spec, with the spec's
+description; it shows up in the reports list. No LLM is called. Answers
+`404` when the user cannot read the spec, `422` when its Turtle file is gone
+or no longer checks out. A failed run is only logged.
 
 ### Data model
 
@@ -244,8 +259,8 @@ read the conversation.
 | `sioc:Thread` | a conversation, made by the frontend |
 | `sioc:Post`, `sioct:InstantMessage` | a message: `sioc:content`, `foaf:maker`, `as:attachment` to its bijlagen |
 | `nfo:FileDataObject` | a bijlage; `dct:type` says spec or executed report |
-| `reporting:Report` | one per run; `dct:title`, a Dutch `dct:description` of at most 300 characters, `prov:generated` to the CSV, and `dct:conformsTo` its spec |
-| `reporting:ReportSpec` | the spec of one run; the same title, description and creation time, `prov:generated` to the CSV, and `dct:isPartOf` its conversation |
+| `reporting:Report` | one per run, in the chat or from `POST /assistant/report-specs/:id/run`; `dct:title`, a Dutch `dct:description` of at most 300 characters, `prov:generated` to the CSV, and `dct:conformsTo` its spec |
+| `reporting:ReportSpec` | the spec of one run in the chat; the same title, description and creation time, `dct:isPartOf` its conversation, and `prov:generated` to its Turtle file (the spec bijlage). Its reports link to it, not the other way round. |
 
 The two bijlage types:
 

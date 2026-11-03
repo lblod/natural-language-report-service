@@ -1,10 +1,10 @@
 import { app, errorHandler } from 'mu';
 import bodyParser from 'body-parser';
 import { loadProfiles } from './src/runner/profile.js';
-import { readConversation, readHistory, writeMessage, deleteConversation } from './src/chat.js';
+import { readConversation, readHistory, writeMessage, deleteConversation, readReportSpec, readSessionMaker, getSessionUri } from './src/chat.js';
 import { wantsExecution } from './src/llm/mode.js';
 import { describeReport } from './src/llm/summary.js';
-import { prepareExecution, executeSpec, refineSpec } from './src/report-assistant.js';
+import { prepareExecution, executeSpec, refineSpec, prepareSavedSpec, executeSavedSpec } from './src/report-assistant.js';
 
 const PROFILE_DIR = process.env.PROFILE_DIR || '/config/profiles';
 // The agent that signs the assistant's messages, seeded by the portal's
@@ -91,6 +91,44 @@ app.delete('/assistant/conversations/:id', async function(req, res) {
   } catch (e) {
     console.error('[chat] could not delete the conversation:', e);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// Run a saved report spec again, outside the chat. The checks answer at
+// once: 404 when the caller cannot read the spec, 422 when its spec file is
+// gone or no longer checks out against the profiles. Then 202, and the run
+// goes on as the caller: a large report takes minutes, too long to keep the
+// request open. The new report shows up in the reports list; a failed run
+// is only logged.
+app.post('/assistant/report-specs/:id/run', async function(req, res) {
+  let reportSpec, prepared;
+  try {
+    // the access check: the caller's session decides what is readable
+    reportSpec = await readReportSpec(req.params.id);
+    if (!reportSpec) return res.status(404).json({ error: 'no such report spec' });
+    prepared = prepareSavedSpec(reportSpec, profiles);
+  } catch (e) {
+    console.error('[reports] could not prepare the run:', e);
+    return res.status(500).json({ error: e.message });
+  }
+  if (prepared.error) {
+    console.error(`[reports] report spec ${req.params.id} cannot run: ${prepared.error}`);
+    return res.status(422).json({ error: prepared.error });
+  }
+
+  res.status(202).send();
+
+  try {
+    // A missing or unresolvable session person must not stop the run: the
+    // report is then written with no prov:wasAttributedTo.
+    const creator = await readSessionMaker(getSessionUri(req)).catch(e => {
+      console.error('[reports] could not resolve the session user:', e);
+      return null;
+    });
+    await executeSavedSpec(prepared.spec, reportSpec, profiles, creator);
+    console.log(`[reports] ran report spec ${req.params.id}`);
+  } catch (e) {
+    console.error(`[reports] run of report spec ${req.params.id} failed:`, e);
   }
 });
 

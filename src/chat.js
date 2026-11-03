@@ -136,16 +136,15 @@ export async function writeMessage({ conversationUri, content, maker, attachment
   return id;
 }
 
-// The report of one run, pointing at the logical file of its CSV, so it
-// shows up in the reports list. The description is the short Dutch text
-// written from the conversation. The report conforms to a ReportSpec that
-// carries the same metadata and the conversation it came from.
-export async function registerReport(title, fileUri, description, conversationUri) {
+// The ReportSpec of a run in the chat: the report's title, description and
+// creation time, dct:isPartOf its conversation and prov:generated its
+// Turtle file (the spec bijlage). The CSV belongs to the report, which
+// links here with dct:conformsTo. The Turtle file is what the spec tab
+// downloads and what runs again later, outside the chat. Returns the spec
+// uri.
+export async function registerReportSpec(title, description, conversationUri, specFileUri) {
   const id = uuid();
-  const specId = uuid();
-  const now = new Date();
-  const report = sparqlEscapeUri(`${REPORT_BASE}${id}`);
-  const spec = sparqlEscapeUri(`${REPORT_BASE}${specId}`);
+  const spec = `${REPORT_BASE}${id}`;
   const descriptionLine = description
     ? `dct:description ${sparqlEscapeString(description)} ;\n        `
     : '';
@@ -154,19 +153,87 @@ export async function registerReport(title, fileUri, description, conversationUr
     : '';
   await update(`${PREFIXES}
     INSERT DATA {
-      ${report} a ${sparqlEscapeUri(REPORT_CLASS)} ;
+      ${sparqlEscapeUri(spec)} a ${sparqlEscapeUri(REPORT_SPEC_CLASS)} ;
         mu:uuid ${sparqlEscapeString(id)} ;
         dct:title ${sparqlEscapeString(title)} ;
-        ${descriptionLine}dct:created ${sparqlEscapeDateTime(now)} ;
-        prov:generated ${sparqlEscapeUri(fileUri)} ;
-        dct:conformsTo ${spec} .
-
-      ${spec} a ${sparqlEscapeUri(REPORT_SPEC_CLASS)} ;
-        mu:uuid ${sparqlEscapeString(specId)} ;
-        dct:title ${sparqlEscapeString(title)} ;
-        ${descriptionLine}dct:created ${sparqlEscapeDateTime(now)} ;
-        ${conversationLine}prov:generated ${sparqlEscapeUri(fileUri)} .
+        ${descriptionLine}dct:created ${sparqlEscapeDateTime(new Date())} ;
+        ${conversationLine}prov:generated ${sparqlEscapeUri(specFileUri)} .
     }`, { scope: WRITE_SCOPE });
+  return spec;
+}
+
+// The report of one run, pointing at the logical file of its CSV, so it
+// shows up in the reports list. The description is the short Dutch text
+// written from the conversation. The report conforms to its ReportSpec
+// (dct:conformsTo); a spec that runs again gets one report per run.
+// creatorUri is the person who ran the spec, recorded with
+// prov:wasAttributedTo. Absent (no session resolved), no attribution line.
+export async function registerReport(title, fileUri, description, specUri, creatorUri) {
+  const id = uuid();
+  const descriptionLine = description
+    ? `dct:description ${sparqlEscapeString(description)} ;\n        `
+    : '';
+  const creatorLine = creatorUri
+    ? `prov:wasAttributedTo ${sparqlEscapeUri(creatorUri)} ;\n        `
+    : '';
+  await update(`${PREFIXES}
+    INSERT DATA {
+      ${sparqlEscapeUri(`${REPORT_BASE}${id}`)} a ${sparqlEscapeUri(REPORT_CLASS)} ;
+        mu:uuid ${sparqlEscapeString(id)} ;
+        dct:title ${sparqlEscapeString(title)} ;
+        ${descriptionLine}${creatorLine}dct:created ${sparqlEscapeDateTime(new Date())} ;
+        prov:generated ${sparqlEscapeUri(fileUri)} ;
+        dct:conformsTo ${sparqlEscapeUri(specUri)} .
+    }`, { scope: WRITE_SCOPE });
+}
+
+// The person for the caller's session, from the session's account:
+// <session> session:account ?account, ?person foaf:account ?account. Or null
+// when the session has no account (or the caller may not read the sessions
+// graph). sessionUri is http://mu.semte.ch/sessions/<mu-session-id>, built
+// by the route from the mu-session-id header.
+export async function readSessionMaker(sessionUri) {
+  const result = await query(`${PREFIXES}
+    SELECT ?person WHERE {
+      ${sparqlEscapeUri(sessionUri)} session:account ?account .
+      ?person foaf:account ?account .
+    } LIMIT 1`);
+  return result.results.bindings[0]?.person?.value ?? null;
+}
+
+// The session uri of the incoming request, from the mu-session-id header
+// that mu-identifier sets. Or null without the header.
+export function getSessionUri(req) {
+  const sessionId = req.get('mu-session-id');
+  return sessionId ? `http://mu.semte.ch/sessions/${sessionId}` : null;
+}
+
+// The ReportSpec with this uuid as { uri, title, description, specFileName },
+// or null when it does not exist or the caller may not read it. This read
+// is the access check: the caller's session decides what is readable.
+// specFileName is the name of its Turtle file (prov:generated). A spec made
+// before that pointed at its CSV there; readSpecFile refuses that name, so
+// such a spec cannot run again.
+export async function readReportSpec(id) {
+  const result = await query(`${PREFIXES}
+    SELECT ?spec ?title ?description ?specFileName WHERE {
+      ?spec a ${sparqlEscapeUri(REPORT_SPEC_CLASS)} ;
+        mu:uuid ${sparqlEscapeString(id)} .
+      OPTIONAL { ?spec dct:title ?title . }
+      OPTIONAL { ?spec dct:description ?description . }
+      OPTIONAL {
+        ?spec prov:generated ?specFile .
+        ?specFile nfo:fileName ?specFileName .
+      }
+    } LIMIT 1`);
+  const binding = result.results.bindings[0];
+  if (!binding) return null;
+  return {
+    uri: binding.spec.value,
+    title: binding.title?.value,
+    description: binding.description?.value,
+    specFileName: binding.specFileName?.value,
+  };
 }
 
 // Writes a file to the share folder, where the file service serves it
@@ -228,27 +295,45 @@ export async function registerFile(shareName, format, type, name = shareName) {
   return logical;
 }
 
-// Deletes the conversation, its messages, their bijlagen (the logical file
-// and the physical one under it) and the reports on those files, then the
-// share files. Returns how many share files it removed. It runs as the
-// caller, so the auth layer keeps a user to their own conversation.
+// Deletes the conversation, its messages, its report specs and the bijlagen
+// no report needs (the spec files: the logical file, the physical one under
+// it and the share file). The reports stay, with their CSV: they are
+// results, listed under Reports. The CSV of a chat run is a bijlage of the
+// answer, so a bijlage a report generated is skipped. A kept report's
+// dct:conformsTo then points at a deleted spec. Returns how many share files
+// it removed. It runs as the caller, so the auth layer keeps a user to their
+// own conversation.
+//
+// Every query here runs under WRITE_SCOPE, the scope the reports and files
+// were written with. Without a scope, a type the user may write in several
+// graphs (reports, files) is deleted in only one of them by sparql-parser
+// 0.0.15, often not the one the data is in: the spec stayed while its share
+// file was removed.
 export async function deleteConversation(conversationUri) {
   const conversation = sparqlEscapeUri(conversationUri);
 
-  // The file names first: once the triples are gone they cannot be found
-  // back.
+  // The bijlagen and their share names first: once the triples are gone
+  // they cannot be found back. ?report is set when a report generated the
+  // bijlage; the filter happens here, not in SPARQL, to keep the query plain
+  // for sparql-parser.
   const result = await query(`${PREFIXES}
-    SELECT DISTINCT ?doc ?name WHERE {
+    SELECT DISTINCT ?doc ?name ?report WHERE {
       ?message sioc:has_container ${conversation} ;
         as:attachment ?doc .
       OPTIONAL {
         ?physical nie:dataSource ?doc ;
           nfo:fileName ?name .
       }
-    }`);
+      OPTIONAL {
+        ?report a ${sparqlEscapeUri(REPORT_CLASS)} ;
+          prov:generated ?doc .
+      }
+    }`, { scope: WRITE_SCOPE });
   const rows = result.results.bindings;
-  const docs = [...new Set(rows.map(b => b.doc.value))];
-  const names = [...new Set(rows.filter(b => b.name).map(b => b.name.value))];
+  const resultFiles = new Set(rows.filter(b => b.report).map(b => b.doc.value));
+  const rowsToDelete = rows.filter(b => !resultFiles.has(b.doc.value));
+  const docs = [...new Set(rowsToDelete.map(b => b.doc.value))];
+  const names = [...new Set(rowsToDelete.filter(b => b.name).map(b => b.name.value))];
 
   await update(`
     DELETE {
@@ -256,7 +341,7 @@ export async function deleteConversation(conversationUri) {
     } WHERE {
       VALUES ?conversation { ${conversation} }
       ?conversation ?cp ?co .
-    }`);
+    }`, { scope: WRITE_SCOPE });
 
   await update(`${PREFIXES}
     DELETE {
@@ -264,20 +349,29 @@ export async function deleteConversation(conversationUri) {
     } WHERE {
       ?message sioc:has_container ${conversation} ;
         ?mp ?mo .
-    }`);
+    }`, { scope: WRITE_SCOPE });
+
+  // The specs by their conversation, not by their file: an older spec points
+  // at its CSV, which stays.
+  await update(`${PREFIXES}
+    DELETE {
+      ?spec ?sp ?so .
+    } WHERE {
+      ?spec a ${sparqlEscapeUri(REPORT_SPEC_CLASS)} ;
+        dct:isPartOf ${conversation} ;
+        ?sp ?so .
+    }`, { scope: WRITE_SCOPE });
 
   if (docs.length) {
     await update(`${PREFIXES}
       DELETE {
         ?doc ?dp ?do .
         ?physical ?pp ?po .
-        ?report ?rp ?ro .
       } WHERE {
         VALUES ?doc { ${docs.map(sparqlEscapeUri).join(' ')} }
         ?doc ?dp ?do .
         OPTIONAL { ?physical nie:dataSource ?doc ; ?pp ?po . }
-        OPTIONAL { ?report prov:generated ?doc ; ?rp ?ro . }
-      }`);
+      }`, { scope: WRITE_SCOPE });
   }
 
   let removed = 0;
