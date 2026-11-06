@@ -50,14 +50,20 @@ export async function lookupValues(profile, field, term) {
   if (!type) return `field "${field}" not found in profile "${profile.title}"`;
 
   // Only within the class: a common word ("gemeente") also sits in hundreds
-  // of unrelated labels. Nothing found means the model falls back on
-  // rep:anyOf with words, as the prompt says.
+  // of unrelated labels. Nothing found means the model falls back on a
+  // sh:pattern on the name, as the prompt says; the answer tells it whether
+  // the class has any readable instance at all, so a miss on a class the
+  // service cannot read is not taken for a misspelling.
   const rows = await queryLabels(term, type);
   // "Gent" must surface before "AGB Erfgoed Gent".
   const lower = term.toLowerCase();
   const exactRow = rows.find(r => r.label.toLowerCase() === lower);
   const matches = (exactRow ? [exactRow, ...rows.filter(r => r !== exactRow)] : rows).slice(0, LOOKUP_LIMIT);
-  if (!matches.length) return `no value matches "${term}" in ${field}.`;
+  if (!matches.length) {
+    const any = await queryPublic(`ASK { ?uri a <${type}> }`);
+    if (!any.boolean) return `nothing of ${field} is in the part of the database you read: match the name text with sh:pattern.`;
+    return `no value matches "${term}" in ${field}. You read only part of the database, so the value may well exist where the report runs: match the name text with sh:pattern, or try another spelling first.`;
+  }
 
   const lines = matches.map(m => `${m.label}  <${m.uri}>`);
   if (matches.length >= LOOKUP_LIMIT) lines.push(`(${LOOKUP_LIMIT}+ matches, narrow the term)`);

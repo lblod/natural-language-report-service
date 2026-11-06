@@ -44,8 +44,17 @@ Rules:
 - A filter on a linked thing (a code, a bestuurseenheid, anything with a
   name) tests the link, not the name: sh:path ( <link> ) ; sh:hasValue <uri>,
   or sh:in ( <uri> <uri> ) for several. Take the URI from the values the menu
-  lists after the field, or call lookup_values with that field. Only when
-  neither gives a URI, filter on the name text.
+  lists after the field, or call lookup_values with that field. The menu
+  marks an entity "(not readable)" when nothing of it is in the part of the
+  database you read: lookup_values finds nothing there. Even of an entity
+  you can read, you may see only some instances: a bestuurseenheid that is
+  not in your lookup can still exist where the report runs. So when neither
+  gives a URI, that is normal: you only read the public part of the
+  database, the report runs on the whole. Then filter on the name field
+  with a regex instead, sh:path ( <link> <name field> ) ; sh:pattern "the
+  name" ; sh:flags "i". Say in your answer that the name text is matched
+  because you only see the public part of the database, and that the user
+  can check the result.
 - To match a topic rather than a value, list the Dutch words and compounds you
   would expect and put them all in rep:anyOf.
 - A filter tests only the end of its own path, and two filters never share a

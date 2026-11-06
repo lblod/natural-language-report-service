@@ -27,7 +27,7 @@ In sh:path, use the predicate URI shown after each field name, not the field nam
 An inverse hop (the field shows "(inverse)") goes in the list as [ sh:inversePath <predicate> ] .
 When two entities share one sh:targetClass, pick one with rep:entity <the URI after the entity>.
 A field that links to several entities ("→ a or b") reaches all of them; the steps after it decide. To keep one kind, add a rep:where on a step only that kind has.
-To filter on what a link reaches (a code, a bestuurseenheid, anything with a name), end the filter path on the link and give the URI: sh:property [ sh:path ( <link> ) ; sh:hasValue <uri> ], or sh:in ( <uri> <uri> ) for several. The URI is in the values listed after the field, or lookup_values finds it. Compare the name text only when no URI can be found.
+To filter on what a link reaches (a code, a bestuurseenheid, anything with a name), end the filter path on the link and give the URI: sh:property [ sh:path ( <link> ) ; sh:hasValue <uri> ], or sh:in ( <uri> <uri> ) for several. The URI is in the values listed after the field; "(many)" means more values than listed, lookup_values finds the URI. "(not readable)" means nothing of it is in the part of the database you read: lookup_values finds nothing there. Even of a readable entity you may see only some instances. When no URI can be found, that is normal: match the name text instead, sh:property [ sh:path ( <link> <name field> ) ; sh:pattern "the name" ; sh:flags "i" ], and say why.
 A date filter is sh:minInclusive or sh:maxInclusive with "yyyy-mm-ddThh:mm:ss"^^xsd:dateTime.
 The time is required: T00:00:00 starts a day, T23:59:59 ends it.
 (the xsd prefix above is not copied: add @prefix xsd: <http://www.w3.org/2001/XMLSchema#>).
@@ -54,23 +54,26 @@ The time is required: T00:00:00 starts a day, T23:59:59 ends it.
 
 // A code-list field: the list's name and, when the list is short, its
 // values with their URIs, so the model needs no lookup. "…" only when the
-// list holds more than it shows.
+// list holds more than it shows; "(not readable)" when the service reads
+// nothing of it, so the model does not look it up.
 function formatConceptLabel(type, { values, more }) {
-  if (!values.length) return shortenUri(type);
-  return `${shortenUri(type)} — ${values.length} waarden: ${formatValues(values)}${more ? ', …' : ''}`;
+  if (!values.length) return `${shortenUri(type)} (not readable)`;
+  return `${shortenUri(type)} — ${values.length} values: ${formatValues(values)}${more ? ', …' : ''}`;
 }
 
 // A link to another entity: its name and, when that entity has few
 // instances (a code), its values with their URIs, so the model can filter
-// on the link without a lookup. "(veel)" when there are more: then
-// lookup_values finds the URI.
+// on the link without a lookup. "(many)" when there are more: then
+// lookup_values finds the URI. "(not readable)" when the service reads
+// nothing of it: then the model matches the name text.
 async function formatLinkedLabel(profile, nodeUri) {
   const s = profile.shapes.find(x => x.uri === nodeUri);
   if (!s) return shortenUri(nodeUri);
   const name = s.label || s.targetClass;
   const { values, more } = await fetchCodeList(s.targetClass);
-  if (!values.length || more) return `${name} (veel)`;
-  return `${name} — ${values.length} waarden: ${formatValues(values)}`;
+  if (!values.length) return `${name} (not readable)`;
+  if (more) return `${name} (many)`;
+  return `${name} — ${values.length} values: ${formatValues(values)}`;
 }
 
 // "label <uri>" per value, comma separated.
