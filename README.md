@@ -7,6 +7,4 @@ Dutch. The user confirms. The service checks the spec and runs it as the
 user. The LLM does not write SPARQL. The LLM does not see the data of the
 report.
 
-Work in progress, POC phase. Scheduled reports stay in
-`loket-report-generation-service`.
-
+Currently works stopped in favour of: https://github.com/lblod/report-assistant-service
