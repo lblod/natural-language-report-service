@@ -82,6 +82,20 @@ sparql-parser:
 Do not set `DEFAULT_MU_AUTH_SCOPE`: it would scope every query, the report
 run too.
 
+### Logging the LLM calls
+
+The call to the provider is TLS, so [app-http-logger](https://github.com/mu-semtech/app-http-logger)
+cannot read it. An app that logs its traffic has a `sink`, a container with the
+`logging` label that answers every request with `200 {}`; a copy of a TLS
+exchange posted there is captured like any other call. Set `LOG_SINK_URL`
+(for example `http://sink/llm`) and the service posts every exchange as
+`{ "request": <the body sent>, "response": <the answer or { "error" }> }`,
+without waiting for the sink. The copy carries the user's questions and the
+answers: run app-http-logger in its encrypting mode. Packetbeat caps a captured
+message (`PACKETBEAT_MAX_MESSAGE_SIZE`, 100 KB by default); a request with a
+profile menu and history can be larger, so raise that cap in app-http-logger
+or accept cut copies.
+
 The service writes messages, reports and files without naming a graph, so
 they land in every graph the user may write that accepts those types. To keep
 them in one graph, set `WRITE_SCOPE`. Every write then runs under that scope,
@@ -210,7 +224,8 @@ lists.
 | `SUBJECT_CHUNK_SIZE` | `100` | rows per column query; lower it when the database refuses long queries |
 | `LLM_RETRIES` | `3` | retries of an LLM call that fails on the network (no connection, a reset, no answer) or with a 500, 502, 503 or 504. Other failures fail at once. |
 | `LLM_RETRY_DELAY` | `2000` | ms before the first retry; each next one waits twice as long |
-| `LOG_LLM` | `false` | log every LLM request and response |
+| `LOG_LLM` | `false` | log every LLM request and response to stdout |
+| `LOG_SINK_URL` | | set, every LLM exchange (request body, response or error) is also POSTed here, fire-and-forget, so app-http-logger can record it; see below. Unset, nothing is sent. |
 
 ### API
 

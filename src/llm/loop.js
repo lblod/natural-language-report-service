@@ -16,6 +16,10 @@ const LLM_MODEL = process.env.LLM_MODEL;
 const LLM_API_KEY = process.env.LLM_API_KEY;
 // LOG_LLM=1 dumps every request to and response from the provider, verbatim.
 const LOG_LLM = /^(true|1)$/i.test(process.env.LOG_LLM || '');
+// Set, every exchange with the provider is also posted here, so app-http-logger
+// records it (the sink of the app). The provider call itself is TLS, which
+// the logger cannot read.
+const LOG_SINK_URL = process.env.LOG_SINK_URL;
 // A call that fails on the network or with a status in RETRY_STATUS is tried
 // again LLM_RETRIES times. The first retry waits LLM_RETRY_DELAY ms, every
 // next one twice as long. Any other failure is thrown at once.
@@ -230,11 +234,30 @@ export async function callLlm(messages, tools = null) {
   } else {
     console.log('[llm] sending instructions to llm');
   }
-  const data = await postWithRetry(body);
+  let data;
+  try {
+    data = await postWithRetry(body);
+  } catch (e) {
+    if (LOG_SINK_URL) copyToSink(body, { error: e.message });
+    throw e;
+  }
   if (LOG_LLM) {
     console.log(`[llm] response:\n${JSON.stringify(data, null, 2)}`);
   }
+  if (LOG_SINK_URL) copyToSink(body, data);
   return data.choices[0].message;
+}
+
+// A copy of one exchange to the app's log sink: the body as it went to the
+// provider (no Authorization header) and the answer, or the error when the
+// call failed. Fire-and-forget, like acmidm-login-service does with its
+// token sets: the sink never slows or fails a turn.
+function copyToSink(request, response) {
+  fetch(LOG_SINK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request, response }),
+  }).catch(e => console.error('[llm] could not copy the exchange to the sink:', e.message));
 }
 
 // POST to the provider, with retries. A network error or a status in
