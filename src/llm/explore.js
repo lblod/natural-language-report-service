@@ -8,7 +8,7 @@ import { query, sparqlEscapeString } from 'mu';
 
 // Must match the with-scope grant in the app's config.lisp.
 const SERVICE_SCOPE = process.env.SERVICE_SCOPE || 'http://services.semantic.works/natural-language-report';
-export const INLINE_VALUES_MAX = Number(process.env.INLINE_VALUES_MAX || 50);
+const INLINE_VALUES_MAX = Number(process.env.INLINE_VALUES_MAX || 50);
 const LOOKUP_LIMIT = 25;
 
 // Every read of the LLM goes through here, under the service scope: public
@@ -18,10 +18,12 @@ function queryPublic(q) {
 }
 
 // Up to INLINE_VALUES_MAX values [{ uri, label }] of a code list, read fresh
-// on every call. Empty when the read fails; the LLM then uses rep:anyOf with
-// words.
+// on every call, as { values, more }. more is true when the list holds more
+// values: the query asks one row extra to know that. Empty when the read
+// fails; the LLM then uses rep:anyOf with words.
 export async function fetchCodeList(type) {
   let values = [];
+  let more = false;
   try {
     const r = await queryPublic(`SELECT ?uri ?label WHERE {
     ?uri a <${type}> .
@@ -31,10 +33,11 @@ export async function fetchCodeList(type) {
       uri: b.uri.value,
       label: b.label?.value || b.uri.value,
     }));
+    more = r.results.bindings.length > INLINE_VALUES_MAX;
   } catch {
     values = [];
   }
-  return values;
+  return { values, more };
 }
 
 // The code-list values that match a term, as text for the LLM: up to
@@ -44,12 +47,10 @@ export async function lookupValues(profile, field, term) {
   const type = resolveClass(profile, field);
   if (!type) return `field "${field}" not found in profile "${profile.title}"`;
 
-  // Search within the class first. A common word ("gemeente") also sits in
-  // hundreds of unrelated labels; an unscoped scan drowns the code.
-  let rows = await queryLabels(term, type);
-  // A code list may type its entries differently than the profile says. Then
-  // scan every label in the public graph.
-  if (!rows.length) rows = await queryLabels(term, null);
+  // Only within the class: a common word ("gemeente") also sits in hundreds
+  // of unrelated labels. Nothing found means the model falls back on
+  // rep:anyOf with words, as the prompt says.
+  const rows = await queryLabels(term, type);
   // "Gent" must surface before "AGB Erfgoed Gent".
   const lower = term.toLowerCase();
   const exactRow = rows.find(r => r.label.toLowerCase() === lower);
@@ -62,11 +63,11 @@ export async function lookupValues(profile, field, term) {
   return lines.join('\n');
 }
 
-// The labels that contain the term, in one class, or in any class when type
-// is null. Regex on str(?label), so language-tagged labels match.
+// The labels of one class that contain the term. Regex on str(?label), so
+// language-tagged labels match.
 async function queryLabels(term, type) {
   const q = `SELECT DISTINCT ?uri ?label WHERE {
-    ?uri a ${type ? `<${type}>` : '?anyType'} ;
+    ?uri a <${type}> ;
          <http://www.w3.org/2004/02/skos/core#prefLabel> ?label .
     FILTER(REGEX(str(?label), ${sparqlEscapeString(escapeRegex(term))}, "i"))
   } ORDER BY ?label LIMIT ${LOOKUP_LIMIT * 8}`;

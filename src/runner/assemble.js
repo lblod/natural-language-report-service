@@ -8,7 +8,8 @@ import { countSharedSteps } from './spec.js';
 // under one node multiply. A column with no value is an empty cell, never a
 // dropped row. sh:groupConcat, sh:min and sh:max fold a column into one cell
 // per node it shares with the other columns. rep:self takes the subject
-// URI. Subjects in stable order; identical rows appear once.
+// URI. Subjects in the order the seed query gave them (ORDER BY ?s);
+// identical rows appear once.
 
 const SH = 'http://www.w3.org/ns/shacl#';
 const XSD = 'http://www.w3.org/2001/XMLSchema#';
@@ -25,7 +26,7 @@ export const NUMERIC_DATATYPES = new Set([
 export function assemble(subjects, values, spec) {
   const tree = buildColumnTree(spec.columns);
   const rows = [spec.columns.map(c => c.label)];
-  for (const subject of [...subjects].sort()) {
+  for (const subject of subjects) {
     const top = { term: { value: subject }, below: new Map() };
     for (const [index, chains] of values.get(subject) || []) {
       for (const chain of chains) addChain(top, tree.paths[index], chain);

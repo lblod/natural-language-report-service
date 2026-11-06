@@ -49,7 +49,7 @@ export function parseFilter(store, p) {
   if (pathQuad) path = parsePath(store, pathQuad);
   return {
     path,
-    constraints: readConstraints(store, p, { withLabel: true }),
+    constraints: readConstraints(store, p),
     where: readWhere(store, p),
   };
 }
@@ -119,7 +119,7 @@ function parsePath(store, pathQuad) {
 
 // The conditions on a filter, column or rep:where as plain values: the
 // counts, sh:hasValue, sh:in, the ranges, sh:pattern and rep:anyOf.
-function readConstraints(store, p, { withLabel = false } = {}) {
+function readConstraints(store, p) {
   const one = (pred) => store.getQuads(p, pred, null)[0]?.object || null;
   const constraints = {};
   const minCount = one(SH + 'minCount');
@@ -144,11 +144,6 @@ function readConstraints(store, p, { withLabel = false } = {}) {
   const anyOf = one(REP + 'anyOf');
   if (anyOf) constraints.anyOf = readRdfList(store, anyOf).map(toTerm)
     .map(t => ({ type: t.type, value: t.value }));
-  // read but never used by the runner; check.js refuses it (a filter has no label)
-  if (withLabel) {
-    const label = one(RDFS_LABEL);
-    if (label) constraints.label = label.value;
-  }
   return constraints;
 }
 

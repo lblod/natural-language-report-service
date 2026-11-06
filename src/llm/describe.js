@@ -1,7 +1,7 @@
 // A profile as a plain text menu: entities, fields, code lists. Code lists up
 // to INLINE_VALUES_MAX are inlined, so the LLM never has to
 // search the short ones.
-import { fetchCodeList, INLINE_VALUES_MAX } from './explore.js';
+import { fetchCodeList } from './explore.js';
 
 // The menu: how a spec looks, then per entity each field and its type: a
 // datatype, a code list (with its values when short) or a link to another
@@ -48,12 +48,12 @@ The time is required: T00:00:00 starts a day, T23:59:59 ends it.
 }
 
 // A code-list field: the list's name and, when the list is short, its
-// values, so the model needs no lookup.
-function formatConceptLabel(type, values) {
+// values, so the model needs no lookup. "…" only when the list holds more
+// than it shows.
+function formatConceptLabel(type, { values, more }) {
   if (!values.length) return shortenUri(type);
   const names = values.map(v => v.label).join(', ');
-  const more = values.length >= INLINE_VALUES_MAX ? ', …' : '';
-  return `${shortenUri(type)} — ${values.length} waarden: ${names}${more}`;
+  return `${shortenUri(type)} — ${values.length} waarden: ${names}${more ? ', …' : ''}`;
 }
 
 // A link to another entity: its name plus "(veel)", many. Unlike a short

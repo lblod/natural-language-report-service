@@ -32,7 +32,7 @@ no markdown.`;
 export async function wantsExecution(turns) {
   let message;
   try {
-    ({ message } = await callLlm([{ role: 'system', content: MODE_PROMPT }, ...turns.slice(-6)]));
+    message = await callLlm([{ role: 'system', content: MODE_PROMPT }, ...turns.slice(-6)]);
   } catch {
     // The call failed (no LLM, provider down). Refine: safer than running a
     // report on a guess, and the refine loop will surface the real error.

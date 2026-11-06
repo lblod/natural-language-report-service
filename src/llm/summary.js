@@ -13,30 +13,20 @@ says what the report lists and which filters it applies. Use at most 300
 characters. No markdown, no quotes, no title, no line breaks. Reply with the
 description only.`;
 
-// One description, or the title when the model returns no text. A failing
-// call throws: the report is not registered without its description.
+// One description, or the title when the model returns no text. Only
+// `content` counts: reasoning_content and the like are the model's thinking,
+// not a description for the reports list. A failing call throws: the report
+// is not registered without its description.
 export async function describeReport(turns, title) {
   const transcript = turns
     .filter(t => t.content && t.content.trim())
     .map(t => `${t.role === 'assistant' ? 'Assistent' : 'Gebruiker'}: ${t.content.trim()}`)
     .join('\n\n');
-  const { message } = await callLlm([
+  const message = await callLlm([
     { role: 'system', content: DESCRIPTION_PROMPT },
     { role: 'user', content: `Rapporttitel: ${title || '(geen titel)'}\n\nGesprek:\n${transcript}` },
   ]);
-  return shorten(readFirstText(message)) || shorten(title);
-}
-
-// Reasoning models may leave `content` empty, or not answer at all when the
-// thinking burned the token budget. Then take the first non-empty field of
-// reasoning_content, reasoning and thinking. Those may hold the model's
-// thinking rather than its answer.
-function readFirstText(message) {
-  for (const key of ['content', 'reasoning_content', 'reasoning', 'thinking']) {
-    const v = message?.[key];
-    if (typeof v === 'string' && v.trim()) return v;
-  }
-  return '';
+  return shorten(message?.content) || shorten(title);
 }
 
 // One line of at most MAX_LENGTH characters; a cut gets an ellipsis.

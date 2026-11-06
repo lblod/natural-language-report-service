@@ -82,10 +82,10 @@ sparql-parser:
 Do not set `DEFAULT_MU_AUTH_SCOPE`: it would scope every query, the report
 run too.
 
-The service writes reports and files without naming a graph, so they land in
-every graph the user may write that accepts those types. To keep them in one
-graph, set `WRITE_SCOPE`. The service then writes reports and files under that
-scope, still as the user, and only the grants inside that scope apply. The
+The service writes messages, reports and files without naming a graph, so
+they land in every graph the user may write that accepts those types. To keep
+them in one graph, set `WRITE_SCOPE`. Every write then runs under that scope,
+still as the user, and only the grants inside that scope apply. The
 conversation delete runs under it too: without a scope, sparql-parser 0.0.15
 deletes a triple in only one of the graphs that accept its type, which may
 not be the graph it is in. Use
@@ -201,20 +201,15 @@ lists.
 | `PROFILE_DIR` | `/config/profiles` | folder with the profiles, one `.ttl` file each |
 | `SHARE_DIR` | `/share` | where CSVs and specs are written |
 | `SERVICE_SCOPE` | `http://services.semantic.works/natural-language-report` | scope of the code-list reads |
-| `WRITE_SCOPE` | | scope of the report and file writes and of the conversation delete. Unset, no scope is sent. |
+| `WRITE_SCOPE` | | scope of every write (messages, reports, files) and of the conversation delete. Unset, no scope is sent. |
 | `CHAT_ASSISTANT_URI` | `http://data.lblod.info/id/chat-agents/report-assistant` | agent that signs the answers and is the source (`prov:wasAttributedTo`) of every spec and report |
-| `CHAT_HISTORY_LIMIT` | `20` | messages of history a turn reads |
-| `REPORT_CLASS` | `http://lblod.data.gift/vocabularies/reporting/Report` | type of the report resource |
 | `CSV_SEPARATOR` | `;` | CSV column separator |
 | `ROW_LIMIT` | `200000` | a report with more rows fails, it is never cut |
 | `MAX_PATH_DEPTH` | `8` | longest path in a spec |
 | `INLINE_VALUES_MAX` | `50` | code lists up to this size are shown to the LLM in full |
-| `SEED_PAGE_SIZE` | `5000` | page size when the run fetches the rows |
 | `SUBJECT_CHUNK_SIZE` | `100` | rows per column query; lower it when the database refuses long queries |
-| `MAX_ROUNDS` | `12` | LLM calls per turn while it writes a spec |
-| `LLM_RETRIES` | `3` | retries of an LLM call that fails on the network (no connection, a reset, no answer) or with a status in `LLM_RETRY_STATUS`. Other failures fail at once. |
-| `LLM_RETRY_STATUS` | `500,502,503,504` | the statuses that are retried; add for example `429` or `408` |
-| `LLM_RETRY_DELAY` | `2000` | ms before the first retry; each next one waits twice as long. A `Retry-After` from the provider wins, up to 60 s. |
+| `LLM_RETRIES` | `3` | retries of an LLM call that fails on the network (no connection, a reset, no answer) or with a 500, 502, 503 or 504. Other failures fail at once. |
+| `LLM_RETRY_DELAY` | `2000` | ms before the first retry; each next one waits twice as long |
 | `LOG_LLM` | `false` | log every LLM request and response |
 
 ### API
@@ -349,7 +344,8 @@ several values, the row passes if one of them passes.
 | `sh:maxCount 0` | the path leads nowhere |
 | `sh:maxCount 0` with `sh:in` or `sh:hasValue` | the path reaches none of these values |
 
-The service cannot count: a higher `sh:minCount` or `sh:maxCount` is refused.
+The service cannot count: a higher `sh:minCount` or `sh:maxCount` is refused,
+and so is `sh:minCount 0`.
 
 #### What the CSV shows
 
@@ -361,7 +357,7 @@ The service cannot count: a higher `sh:minCount` or `sh:maxCount` is refused.
 | `sh:path rep:self` | the row's own URI |
 | `rdfs:label` | the column header; required and unique |
 | `sh:nodeKind sh:IRI` | show the URI of the node the path ends on |
-| no `rep:collect`, or `rep:collect rep:row` | each value gets its own row; at most one column may say `rep:row` |
+| no `rep:collect`, or `rep:collect rep:row` | each value gets its own row |
 | `rep:collect sh:groupConcat` (+ `sh:separator`) | all values in one cell |
 | `rep:collect sh:min` / `sh:max` | the lowest or highest date or number |
 

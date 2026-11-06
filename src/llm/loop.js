@@ -9,22 +9,19 @@ import { describeProfile } from './describe.js';
 import { parseSpec } from '../runner/spec.js';
 import { SPEC_MEDIA_TYPE, readSpecFile } from '../chat.js';
 
-const MAX_ROUNDS = Number(process.env.MAX_ROUNDS || 12);
-// What an older spec becomes: only the newest spec goes to the model in full.
-const LEFT_OUT = 'Left out: a newer spec follows.';
+// LLM calls per turn while the model writes a spec.
+const MAX_ROUNDS = 12;
 const LLM_BASE_URL = process.env.LLM_BASE_URL;
 const LLM_MODEL = process.env.LLM_MODEL;
 const LLM_API_KEY = process.env.LLM_API_KEY;
 // LOG_LLM=1 dumps every request to and response from the provider, verbatim.
 const LOG_LLM = /^(true|1)$/i.test(process.env.LOG_LLM || '');
-// A call that fails on the network or with a status in LLM_RETRY_STATUS is
-// tried again LLM_RETRIES times. The first retry waits LLM_RETRY_DELAY ms,
-// every next one twice as long. Any other failure is thrown at once.
+// A call that fails on the network or with a status in RETRY_STATUS is tried
+// again LLM_RETRIES times. The first retry waits LLM_RETRY_DELAY ms, every
+// next one twice as long. Any other failure is thrown at once.
 const LLM_RETRIES = Number(process.env.LLM_RETRIES || 3);
 const LLM_RETRY_DELAY = Number(process.env.LLM_RETRY_DELAY || 2000);
-const LLM_RETRY_STATUS = (process.env.LLM_RETRY_STATUS || '500,502,503,504').split(',').map(Number);
-// A Retry-After longer than this is not waited for.
-const MAX_RETRY_AFTER = 60000;
+const RETRY_STATUS = [500, 502, 503, 504];
 
 const REFINE_PROMPT = `You refine report specs with the user. You never write SPARQL and you never run a report.
 
@@ -72,10 +69,9 @@ current spec, the last one in the conversation, comes with the user's
 message. When the user refines (other columns, filters or title), change the
 current spec. When the user asks for a different report, one that lists
 another kind of thing per row, start a new spec. Older specs show only as a
-bijlage name, and a spec you wrote before in this turn shows as "left out"
-once a newer one follows. Only when the user asks for an older spec, open it
-with read_spec and change that one. Never call
-run_report; there is no such tool here. When the spec is ready, ask the user
+bijlage name. Only when the user asks for an older spec, open it with
+read_spec and change that one. Never call run_report; there is no such tool
+here. When the spec is ready, ask the user
 to confirm execution. Then stop.
 
 The spec itself does not go in your text. validate_spec stores a spec that
@@ -105,11 +101,10 @@ export async function ask(turns, profiles) {
   let spec = null;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const { message } = await callLlm(leaveOutOlderSpecs(messages), TOOLS);
+    const message = await callLlm(messages, TOOLS);
     messages.push(message);
     const calls = message.tool_calls || [];
     if (!calls.length) return { text: message.content || '', spec };
-    if (calls.some(c => c.function.name === 'validate_spec')) message.leftOut = { tool_calls: calls.map(leaveOutSpec) };
 
     for (const call of calls) {
       const args = parseArgs(call.function.arguments);
@@ -128,9 +123,7 @@ export async function ask(turns, profiles) {
         }
         spec = result.spec;
       }
-      const reply = { role: 'tool', tool_call_id: call.id, content: result.content };
-      if (call.function.name === 'read_spec' && result.spec) reply.leftOut = { content: LEFT_OUT };
-      messages.push(reply);
+      messages.push({ role: 'tool', tool_call_id: call.id, content: result.content });
     }
   }
   return { text: 'Sorry, dit rapport is te moeilijk. Contacteer de developers.', spec };
@@ -195,8 +188,7 @@ function readProfileUri(turtle) {
 }
 
 // The current spec goes in full under the user's new message: the one spec
-// the history holds as text, so the model needs no read_spec for it. Its
-// short form in leftOut is sent once a newer spec follows.
+// the history holds as text, so the model needs no read_spec for it.
 function addCurrentSpec(messages, current) {
   if (!current) return messages;
   const { name, turtle } = current;
@@ -204,27 +196,12 @@ function addCurrentSpec(messages, current) {
   return [...messages.slice(0, -1), {
     ...last,
     content: `${last.content}\n\nThe current spec, bijlage "${name}":\n\n${turtle}`,
-    leftOut: { content: `${last.content}\n\nThe current spec, bijlage "${name}": ${LEFT_OUT}` },
   }];
 }
 
-// Only the newest spec goes to the model in full. A message that holds an
-// older one goes in its leftOut form; read_spec opens that spec again.
-function leaveOutOlderSpecs(messages) {
-  const newest = messages.findLastIndex(m => m.leftOut);
-  return messages.map((m, i) => (m.leftOut && i !== newest ? { ...m, ...m.leftOut } : m));
-}
-
-// The short form of a model message that called validate_spec: the spec
-// argument becomes LEFT_OUT, every other call stays. ask() stores it as
-// leftOut; it is sent once a newer spec follows (leaveOutOlderSpecs).
-function leaveOutSpec(call) {
-  if (call.function.name !== 'validate_spec') return call;
-  return { ...call, function: { ...call.function, arguments: JSON.stringify({ spec: LEFT_OUT }) } };
-}
-
 // The one place that talks to the provider. Without tools it is a plain
-// completion (the mode check and the report description).
+// completion (the mode check and the report description). Returns the
+// model's message.
 export async function callLlm(messages, tools = null) {
   // Send only the fields every provider accepts back. Attachments never go
   // out.
@@ -241,10 +218,7 @@ export async function callLlm(messages, tools = null) {
     return out;
   });
   const body = { model: LLM_MODEL, messages: wire };
-  if (tools) {
-    body.tools = tools;
-    body.tool_choice = 'auto';
-  }
+  if (tools) body.tools = tools;
   if (LOG_LLM) {
     console.log(`[llm] POST ${LLM_BASE_URL}/chat/completions request:\n${
       JSON.stringify(body, null, 2)}`);
@@ -255,11 +229,11 @@ export async function callLlm(messages, tools = null) {
   if (LOG_LLM) {
     console.log(`[llm] response:\n${JSON.stringify(data, null, 2)}`);
   }
-  return { message: data.choices[0].message };
+  return data.choices[0].message;
 }
 
 // POST to the provider, with retries. A network error or a status in
-// LLM_RETRY_STATUS waits and tries again; the last failure is thrown.
+// RETRY_STATUS waits and tries again; the last failure is thrown.
 async function postWithRetry(body) {
   for (let attempt = 0; ; attempt++) {
     let res;
@@ -275,26 +249,21 @@ async function postWithRetry(body) {
     } catch (e) {
       // No connection, a reset or no answer at all: always worth another try.
       if (attempt >= LLM_RETRIES) throw e;
-      await pause(attempt, null, `${e.message}${e.cause?.code ? ` (${e.cause.code})` : ''}`);
+      await pause(attempt, `${e.message}${e.cause?.code ? ` (${e.cause.code})` : ''}`);
       continue;
     }
     if (res.ok) return res.json();
     const t = await res.text();
-    if (!LLM_RETRY_STATUS.includes(res.status) || attempt >= LLM_RETRIES) {
+    if (!RETRY_STATUS.includes(res.status) || attempt >= LLM_RETRIES) {
       throw new Error(`LLM ${res.status}: ${t.slice(0, 300)}`);
     }
-    await pause(attempt, res.headers.get('retry-after'), `LLM ${res.status}`);
+    await pause(attempt, `LLM ${res.status}`);
   }
 }
 
-// Waits before the next try: exponential back-off with some jitter, so
-// turns that failed together do not retry together. A provider's
-// Retry-After (in seconds) wins when it asks for longer, up to
-// MAX_RETRY_AFTER.
-async function pause(attempt, retryAfter, reason) {
-  const backoff = LLM_RETRY_DELAY * 2 ** attempt * (1 + Math.random() / 2);
-  const asked = Number(retryAfter) * 1000;
-  const wait = asked > backoff ? Math.min(asked, MAX_RETRY_AFTER) : backoff;
+// Waits before the next try: LLM_RETRY_DELAY, doubled on every attempt.
+async function pause(attempt, reason) {
+  const wait = LLM_RETRY_DELAY * 2 ** attempt;
   console.log(`[llm] ${reason}; retry ${attempt + 1}/${LLM_RETRIES} in ${Math.round(wait / 1000)}s`);
   await new Promise(resolve => setTimeout(resolve, wait));
 }

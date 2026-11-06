@@ -133,18 +133,6 @@ function checkCollectMinMaxTyped(spec, profile) {
   return null;
 }
 
-// At most one column may say rep:row. A rule from the first assembler, in
-// which only one column could spread a subject over several rows. rep:row
-// now works like no rep:collect at all.
-function checkOneRowColumn(spec) {
-  const rowCols = spec.columns.filter(c => c.collect === REP + 'row');
-  if (rowCols.length > 1) {
-    const names = rowCols.map(c => `"${c.label}"`).join(' and ');
-    return `only one column may use rep:row. ${names} both do.`;
-  }
-  return null;
-}
-
 // Columns carry no constraints; known collect mode. A condition belongs in
 // sh:property or rep:where, and an unknown mode would be silently ignored.
 function checkColumnPure(spec) {
@@ -163,22 +151,12 @@ function checkColumnPure(spec) {
   return null;
 }
 
-// No label inside a filter or rep:where: a label shows nothing there; it
-// belongs on a column.
-function checkFilterLabel(spec) {
-  for (const { what, cond } of collectConditions(spec)) {
-    if ((cond.constraints || {}).label) {
-      return `${what} carries rdfs:label. Move it to rep:columns to show it.`;
-    }
-  }
-  return null;
-}
-
 // A filter with a path but no constraint selects everything; the model
-// almost certainly meant to filter. Refuse and say what to add.
+// almost certainly meant to filter. Refuse and say what to add. sh:flags is
+// no condition on its own: it only changes sh:pattern or rep:anyOf.
 function checkFilterConstraint(spec) {
   const MEANINGFUL = ['minCount', 'maxCount', 'hasValue', 'in', 'minInclusive',
-    'maxInclusive', 'minExclusive', 'maxExclusive', 'pattern', 'flags', 'anyOf'];
+    'maxInclusive', 'minExclusive', 'maxExclusive', 'pattern', 'anyOf'];
   for (const { what, cond } of collectConditions(spec)) {
     const c = cond.constraints || {};
     if (!MEANINGFUL.some(k => c[k] !== undefined && c[k] !== null)) {
@@ -190,10 +168,15 @@ function checkFilterConstraint(spec) {
 }
 
 // The runner cannot count: it knows sh:maxCount 0 (none) and sh:minCount 1
-// or 2 (two distinct values), nothing more.
+// or 2 (two distinct values), nothing more. sh:minCount 0 is refused too:
+// in SHACL it is no condition, but the runner would read it as "at least
+// one".
 function checkCountLimits(spec) {
   for (const { cond } of collectConditions(spec)) {
     const c = cond.constraints;
+    if (c.minCount === 0) {
+      return 'sh:minCount 0 is no condition. Use sh:minCount 1 for "has one", sh:maxCount 0 for "has none", or drop it.';
+    }
     if (c.maxCount > 0) {
       return `sh:maxCount ${c.maxCount} needs counting, which this service cannot do. Use sh:maxCount 0 for "has none", or drop it.`;
     }
@@ -356,13 +339,11 @@ const CHECKS = [
   checkColumnLabel,
   checkColumnLabelsUnique,
   checkColumnPure,
-  checkFilterLabel,
   checkFilterConstraint,
   checkCountLimits,
   checkAnyOfLimits,
   checkInHomogeneous,
   checkLiteralsParse,
-  checkOneRowColumn,
   checkPathsResolve,
   checkWhereConditions,
   checkRangeOnValue,

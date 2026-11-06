@@ -1,54 +1,79 @@
 // The tools the LLM calls, refinement only: describe_profile,
-// validate_spec, read_spec and lookup_values. Each returns
-// { content, spec }: content is the plain text for the model, spec is set
-// when the answer carries a spec. No report is created, no spec is
-// evaluated; the database reads run under the service scope (public graph).
+// validate_spec, read_spec and lookup_values. Each returns { content }, the
+// plain text for the model; validate_spec adds spec when the spec checked
+// out. No report is created, no spec is evaluated; the database reads run
+// under the service scope (public graph).
 import { parseSpec } from '../runner/spec.js';
 import { checkSpec, buildWhereNotes, checkProfile } from '../runner/check.js';
 import { describeProfile } from './describe.js';
 import { lookupValues } from './explore.js';
 import { readSpecFile } from '../chat.js';
 
-// The tool definitions sent to the model. The descriptions are what the LLM
-// reads to decide which tool to call.
+// The tool definitions sent to the model, in the OpenAI format. The
+// descriptions are what the LLM reads to decide which tool to call.
 export const TOOLS = [
-  defineTool('describe_profile',
-    'Describe one profile: its entities, fields, relations and labels. Inline the values of short code lists.',
-    { profile_id: 'The profile URI from the profile list' }),
-  defineTool('validate_spec',
-    'Validate a report spec (Turtle). Returns "ok", followed by one line per rep:where saying where it applies, or one clear sentence saying what is wrong and what to write instead. No database is touched.',
-    { spec: 'The spec as Turtle text' }),
-  defineTool('read_spec',
-    'Return the Turtle of a spec bijlage, a ttl file attached to an earlier message in this conversation. The current spec already comes with the user\'s message; use this only when the user asks for an older spec. Read-only.',
-    { file_name: 'The file name of the spec bijlage, e.g. specificatie-<uuid>.ttl' }),
-  defineTool('lookup_values',
-    'Search a code list for a term so you can suggest concrete values for a filter (for sh:hasValue or sh:in). Returns up to 25 matches with their URIs and labels, a note when there may be more, and an exact flag when a label equals the term. Reads candidate values only; it never runs the spec and never tells you how many subjects a spec would match. Read-only, no report is created.',
-    {
-      profile_id: 'The profile URI from the profile list',
-      field: 'The field as "entityLabel.fieldLabel", e.g. "bestuurseenheid.naam"',
-      term: 'The Dutch word or name to search for',
-    }),
-];
-
-// One tool definition in the OpenAI format. Every parameter is a required
-// string, which keeps TOOLS short.
-function defineTool(name, description, params) {
-  const properties = {};
-  for (const [key, text] of Object.entries(params)) {
-    properties[key] = { type: 'string', description: text };
-  }
-  return {
+  {
     type: 'function',
     function: {
-      name,
-      description,
-      parameters: { type: 'object', properties, required: Object.keys(params) },
+      name: 'describe_profile',
+      description: 'Describe one profile: its entities, fields, relations and labels. Inline the values of short code lists.',
+      parameters: {
+        type: 'object',
+        properties: {
+          profile_id: { type: 'string', description: 'The profile URI from the profile list' },
+        },
+        required: ['profile_id'],
+      },
     },
-  };
-}
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'validate_spec',
+      description: 'Validate a report spec (Turtle). Returns "ok", followed by one line per rep:where saying where it applies, or one clear sentence saying what is wrong and what to write instead. No database is touched.',
+      parameters: {
+        type: 'object',
+        properties: {
+          spec: { type: 'string', description: 'The spec as Turtle text' },
+        },
+        required: ['spec'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_spec',
+      description: 'Return the Turtle of a spec bijlage, a ttl file attached to an earlier message in this conversation. The current spec already comes with the user\'s message; use this only when the user asks for an older spec. Read-only.',
+      parameters: {
+        type: 'object',
+        properties: {
+          file_name: { type: 'string', description: 'The file name of the spec bijlage, e.g. specificatie-<uuid>.ttl' },
+        },
+        required: ['file_name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'lookup_values',
+      description: 'Search a code list for a term so you can suggest concrete values for a filter (for sh:hasValue or sh:in). Returns up to 25 matches with their URIs and labels, a note when there may be more, and an exact flag when a label equals the term. Reads candidate values only; it never runs the spec and never tells you how many subjects a spec would match. Read-only, no report is created.',
+      parameters: {
+        type: 'object',
+        properties: {
+          profile_id: { type: 'string', description: 'The profile URI from the profile list' },
+          field: { type: 'string', description: 'The field as "entityLabel.fieldLabel", e.g. "bestuurseenheid.naam"' },
+          term: { type: 'string', description: 'The Dutch word or name to search for' },
+        },
+        required: ['profile_id', 'field', 'term'],
+      },
+    },
+  },
+];
 
-// Runs the tool the model asked for, by name. Returns { content, spec }, see
-// the top of this file.
+// Runs the tool the model asked for, by name. Returns { content } or, for
+// validate_spec, { content, spec }: see the top of this file.
 export async function runTool(name, args, profiles) {
   switch (name) {
     case 'describe_profile': return { content: await handleDescribeProfile(args, profiles) };
@@ -83,8 +108,7 @@ function handleValidateSpec({ spec }, profiles) {
 // read_spec: the Turtle of an older spec bijlage, so the user can go back
 // to it. Only spec files this service made are readable.
 function handleReadSpec({ file_name }) {
-  const turtle = readSpecFile(file_name);
-  return turtle ? { content: turtle, spec: turtle } : { content: 'no such spec file.' };
+  return { content: readSpecFile(file_name) || 'no such spec file.' };
 }
 
 // lookup_values: code-list values that match a term, so a filter names

@@ -1,10 +1,10 @@
 import { query, sparqlEscapeUri, sparqlEscapeString, sparqlEscapeDateTime, sparqlEscapeDate } from 'mu';
 import { countSharedSteps } from './spec.js';
 
-// The subjects of a report, one query per page. More than ROW_LIMIT
+// The subjects of a report, PAGE_SIZE per query. More than ROW_LIMIT
 // subjects fails the run.
 const ROW_LIMIT = Number(process.env.ROW_LIMIT || 200000);
-const PAGE_SIZE = Number(process.env.SEED_PAGE_SIZE || 5000);
+const PAGE_SIZE = 5000;
 
 // The subjects of the report (what the rows are about) that match the
 // class, the discriminators and the filters, PAGE_SIZE at a time. More than

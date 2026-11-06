@@ -4,7 +4,7 @@ import { loadProfiles } from './src/runner/profile.js';
 import { readConversation, readHistory, writeMessage, deleteConversation, readReportSpec, CHAT_ASSISTANT_URI } from './src/chat.js';
 import { wantsExecution } from './src/llm/mode.js';
 import { describeReport } from './src/llm/summary.js';
-import { prepareExecution, executeSpec, refineSpec, prepareSavedSpec, executeSavedSpec } from './src/report-assistant.js';
+import { prepareExecution, executeSpec, refineSpec, prepareSpec, runSavedSpec } from './src/report-assistant.js';
 
 const PROFILE_DIR = process.env.PROFILE_DIR || '/config/profiles';
 const TITLE_LENGTH = 80;
@@ -18,8 +18,9 @@ const profiles = loadProfiles(PROFILE_DIR);
 // takes several LLM calls, too long to keep the request open. mu's
 // query/update run as the caller for the whole turn, also after the 202.
 // The template only parses application/vnd.api+json, the chat sends
-// application/json.
-app.post('/assistant/conversations/:id/turns', bodyParser.json(), async function(req, res) {
+// application/json. A failure before the 202 goes to mu's errorHandler;
+// after it, the failure is written as the answer.
+app.post('/assistant/conversations/:id/turns', bodyParser.json(), async function(req, res, next) {
   const content = String(req.body?.content ?? '').trim();
   if (!content) return res.status(400).json({ error: 'content is required' });
 
@@ -28,7 +29,7 @@ app.post('/assistant/conversations/:id/turns', bodyParser.json(), async function
     // the access check: the caller's session decides what is readable
     conversation = await readConversation(req.params.id);
     if (!conversation) return res.status(404).json({ error: 'no such conversation' });
-    history = await readHistory(conversation.uri, CHAT_ASSISTANT_URI);
+    history = await readHistory(conversation.uri);
     questionId = await writeMessage({
       conversationUri: conversation.uri,
       content,
@@ -37,7 +38,7 @@ app.post('/assistant/conversations/:id/turns', bodyParser.json(), async function
     });
   } catch (e) {
     console.error('[chat] could not record the question:', e);
-    return res.status(500).json({ error: e.message });
+    return next(e);
   }
 
   res.status(202).json({ id: questionId });
@@ -74,11 +75,11 @@ app.post('/assistant/conversations/:id/turns', bodyParser.json(), async function
   }
 });
 
-// Delete a conversation with everything that hangs off it: the messages,
-// their bijlagen (triples and share files) and the reports. The read is the
-// access check: the caller's session decides what exists, so another user's
-// conversation is a 404.
-app.delete('/assistant/conversations/:id', async function(req, res) {
+// Delete a conversation, its messages, its report specs and the spec
+// bijlagen (triples and share files). The reports and their CSVs stay. The
+// read is the access check: the caller's session decides what exists, so
+// another user's conversation is a 404.
+app.delete('/assistant/conversations/:id', async function(req, res, next) {
   try {
     const conversation = await readConversation(req.params.id);
     if (!conversation) return res.status(404).json({ error: 'no such conversation' });
@@ -87,7 +88,7 @@ app.delete('/assistant/conversations/:id', async function(req, res) {
     res.status(204).send();
   } catch (e) {
     console.error('[chat] could not delete the conversation:', e);
-    res.status(500).json({ error: e.message });
+    next(e);
   }
 });
 
@@ -97,16 +98,16 @@ app.delete('/assistant/conversations/:id', async function(req, res) {
 // goes on as the caller: a large report takes minutes, too long to keep the
 // request open. The new report shows up in the reports list; a failed run
 // is only logged.
-app.post('/assistant/report-specs/:id/run', async function(req, res) {
+app.post('/assistant/report-specs/:id/run', async function(req, res, next) {
   let reportSpec, prepared;
   try {
     // the access check: the caller's session decides what is readable
     reportSpec = await readReportSpec(req.params.id);
     if (!reportSpec) return res.status(404).json({ error: 'no such report spec' });
-    prepared = prepareSavedSpec(reportSpec, profiles);
+    prepared = prepareSpec(reportSpec.specFileName, profiles);
   } catch (e) {
     console.error('[reports] could not prepare the run:', e);
-    return res.status(500).json({ error: e.message });
+    return next(e);
   }
   if (prepared.error) {
     console.error(`[reports] report spec ${req.params.id} cannot run: ${prepared.error}`);
@@ -116,7 +117,7 @@ app.post('/assistant/report-specs/:id/run', async function(req, res) {
   res.status(202).send();
 
   try {
-    await executeSavedSpec(prepared.spec, reportSpec, profiles);
+    await runSavedSpec(prepared.spec, reportSpec, profiles);
     console.log(`[reports] ran report spec ${req.params.id}`);
   } catch (e) {
     console.error(`[reports] run of report spec ${req.params.id} failed:`, e);

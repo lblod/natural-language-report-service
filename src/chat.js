@@ -1,7 +1,7 @@
 // The chat's reads and writes: conversations, messages, their bijlagen and
 // the reports. Everything runs as the caller.
 //
-// Reports and files are written under WRITE_SCOPE when it is set. The app
+// Every write and the delete run under WRITE_SCOPE when it is set. The app
 // decides which graphs that scope may write, for example only the caller's
 // own graph, so these types do not also land in other graphs the caller can
 // write. Unset, no scope is sent.
@@ -13,13 +13,15 @@ import { readFileSync, writeFileSync, statSync, unlinkSync } from 'fs';
 import { query, update, uuid,
          sparqlEscapeUri, sparqlEscapeString, sparqlEscapeInt, sparqlEscapeDateTime } from 'mu';
 
-const HISTORY_LIMIT = Number(process.env.CHAT_HISTORY_LIMIT || 20);
-const REPORT_CLASS = process.env.REPORT_CLASS || 'http://lblod.data.gift/vocabularies/reporting/Report';
+// Messages of history a turn reads.
+const HISTORY_LIMIT = 20;
+const REPORT_CLASS = 'http://lblod.data.gift/vocabularies/reporting/Report';
 const REPORT_SPEC_CLASS = 'http://lblod.data.gift/vocabularies/reporting/ReportSpec';
 const SHARE_DIR = process.env.SHARE_DIR || '/share';
 const MESSAGE_BASE = 'http://data.lblod.info/id/chat-messages/';
 const FILE_BASE = 'http://data.lblod.info/files/';
 const REPORT_BASE = 'http://data.lblod.info/id/reports/';
+const REPORT_SPEC_BASE = 'http://data.lblod.info/id/report-specs/';
 const WRITE_SCOPE = process.env.WRITE_SCOPE;
 // The agent that signs the assistant's messages, seeded by the portal's
 // chat-assistant migration. It is also the source (prov:wasAttributedTo) of
@@ -67,8 +69,8 @@ export async function readConversation(id) {
 // { role, content, attachments: [{ uri, name, mediaType, type }] }.
 // A message comes back once per bijlage, hence the wider LIMIT. The model
 // needs the conversation so far; the assistant's messages are told apart by
-// its agent URI.
-export async function readHistory(conversationUri, assistantUri) {
+// its agent URI (CHAT_ASSISTANT_URI).
+export async function readHistory(conversationUri) {
   const result = await query(`${PREFIXES}
     SELECT ?message ?content ?maker ?created ?doc ?docName ?docFormat ?docType WHERE {
       ?message sioc:has_container ${sparqlEscapeUri(conversationUri)} ;
@@ -89,7 +91,7 @@ export async function readHistory(conversationUri, assistantUri) {
     let message = byMessage.get(uri);
     if (!message) {
       message = {
-        role: b.maker.value === assistantUri ? 'assistant' : 'user',
+        role: b.maker.value === CHAT_ASSISTANT_URI ? 'assistant' : 'user',
         content: b.content.value,
         attachments: [],
       };
@@ -135,7 +137,7 @@ export async function writeMessage({ conversationUri, content, maker, attachment
     }
     WHERE {
       OPTIONAL { ${conversation} sioc:last_activity_date ?old . }
-    }`);
+    }`, { scope: WRITE_SCOPE });
 
   return id;
 }
@@ -148,12 +150,9 @@ export async function writeMessage({ conversationUri, content, maker, attachment
 // (prov:wasAttributedTo) is the assistant agent. Returns the spec uri.
 export async function registerReportSpec(title, description, conversationUri, specFileUri) {
   const id = uuid();
-  const spec = `${REPORT_BASE}${id}`;
+  const spec = `${REPORT_SPEC_BASE}${id}`;
   const descriptionLine = description
     ? `dct:description ${sparqlEscapeString(description)} ;\n        `
-    : '';
-  const conversationLine = conversationUri
-    ? `dct:isPartOf ${sparqlEscapeUri(conversationUri)} ;\n        `
     : '';
   await update(`${PREFIXES}
     INSERT DATA {
@@ -162,7 +161,8 @@ export async function registerReportSpec(title, description, conversationUri, sp
         dct:title ${sparqlEscapeString(title)} ;
         ${descriptionLine}prov:wasAttributedTo ${sparqlEscapeUri(CHAT_ASSISTANT_URI)} ;
         dct:created ${sparqlEscapeDateTime(new Date())} ;
-        ${conversationLine}prov:generated ${sparqlEscapeUri(specFileUri)} .
+        dct:isPartOf ${sparqlEscapeUri(conversationUri)} ;
+        prov:generated ${sparqlEscapeUri(specFileUri)} .
     }`, { scope: WRITE_SCOPE });
   return spec;
 }
@@ -261,7 +261,7 @@ export async function registerFile(shareName, format, type, name = shareName) {
         nfo:fileName ${sparqlEscapeString(name)} ;
         dct:format ${sparqlEscapeString(format)} ;
         nfo:fileSize ${size} ;
-        dct:created ${now} ;
+        nfo:fileCreated ${now} ;
         dct:type ${sparqlEscapeUri(type)} .
       ${sparqlEscapeUri(`share://${shareName}`)} a nfo:FileDataObject ;
         mu:uuid ${sparqlEscapeString(uuid())} ;
