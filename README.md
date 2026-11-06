@@ -206,7 +206,7 @@ lists.
 | `CSV_SEPARATOR` | `;` | CSV column separator |
 | `ROW_LIMIT` | `200000` | a report with more rows fails, it is never cut |
 | `MAX_PATH_DEPTH` | `8` | longest path in a spec |
-| `INLINE_VALUES_MAX` | `50` | code lists up to this size are shown to the LLM in full |
+| `INLINE_VALUES_MAX` | `50` | code lists and linked entities up to this size are shown to the LLM in full, with URIs |
 | `SUBJECT_CHUNK_SIZE` | `100` | rows per column query; lower it when the database refuses long queries |
 | `LLM_RETRIES` | `3` | retries of an LLM call that fails on the network (no connection, a reset, no answer) or with a 500, 502, 503 or 504. Other failures fail at once. |
 | `LLM_RETRY_DELAY` | `2000` | ms before the first retry; each next one waits twice as long |
@@ -278,8 +278,8 @@ checks the data against a profile.
 | `sh:property` + `sh:path` | a field: one step, a predicate or `[ sh:inversePath p ]` |
 | `sh:name` | the field's name in the menu |
 | `sh:datatype` | a value field: a column may end here |
-| `sh:class` | a code-list field: a column may end here. Short lists show in the menu in full. |
-| `sh:node` | a link to another entity |
+| `sh:class` | a code-list field: a column may end here. Short lists show in the menu in full, with URIs. |
+| `sh:node` | a link to another entity. An entity with few instances (a code) shows in the menu in full, with URIs; a filter on a link tests the URI |
 | `sh:or ( [ sh:node A ] [ sh:node B ] )` | a link that reaches A or B |
 
 The service ignores `sh:description`, cardinality and field paths of more

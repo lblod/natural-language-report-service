@@ -58,7 +58,7 @@ export const TOOLS = [
     type: 'function',
     function: {
       name: 'lookup_values',
-      description: 'Search a code list for a term so you can suggest concrete values for a filter (for sh:hasValue or sh:in). Returns up to 25 matches with their URIs and labels, a note when there may be more, and an exact flag when a label equals the term. Reads candidate values only; it never runs the spec and never tells you how many subjects a spec would match. Read-only, no report is created.',
+      description: 'Search the names (skos:prefLabel) of what a link field reaches, a code list or an entity such as a bestuurseenheid, for a term, so a filter can test the link with the URI (sh:hasValue or sh:in). Returns up to 25 matches with their URIs and labels, a note when there may be more, and an exact flag when a label equals the term. Reads candidate values only; it never runs the spec and never tells you how many subjects a spec would match. Read-only, no report is created.',
       parameters: {
         type: 'object',
         properties: {

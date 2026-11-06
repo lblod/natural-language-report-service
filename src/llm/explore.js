@@ -17,10 +17,12 @@ function queryPublic(q) {
   return query(q, { scope: SERVICE_SCOPE });
 }
 
-// Up to INLINE_VALUES_MAX values [{ uri, label }] of a code list, read fresh
-// on every call, as { values, more }. more is true when the list holds more
-// values: the query asks one row extra to know that. Empty when the read
-// fails; the LLM then uses rep:anyOf with words.
+// Up to INLINE_VALUES_MAX values [{ uri, label }] of a class, read fresh on
+// every call, as { values, more }. more is true when the class holds more
+// instances: the query asks one row extra to know that. No ORDER BY in the
+// query: the menu asks this for every linked entity, and sorting a class of
+// thousands to show nothing would cost the most; the few rows are sorted
+// here. Empty when the read fails; the LLM then uses rep:anyOf with words.
 export async function fetchCodeList(type) {
   let values = [];
   let more = false;
@@ -28,11 +30,11 @@ export async function fetchCodeList(type) {
     const r = await queryPublic(`SELECT ?uri ?label WHERE {
     ?uri a <${type}> .
     OPTIONAL { ?uri <http://www.w3.org/2004/02/skos/core#prefLabel> ?label . }
-  } ORDER BY ?label LIMIT ${INLINE_VALUES_MAX + 1}`);
+  } LIMIT ${INLINE_VALUES_MAX + 1}`);
     values = r.results.bindings.slice(0, INLINE_VALUES_MAX).map(b => ({
       uri: b.uri.value,
       label: b.label?.value || b.uri.value,
-    }));
+    })).sort((a, b) => a.label.localeCompare(b.label));
     more = r.results.bindings.length > INLINE_VALUES_MAX;
   } catch {
     values = [];

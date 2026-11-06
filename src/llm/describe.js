@@ -1,6 +1,6 @@
-// A profile as a plain text menu: entities, fields, code lists. Code lists up
-// to INLINE_VALUES_MAX are inlined, so the LLM never has to
-// search the short ones.
+// A profile as a plain text menu: entities, fields, code lists. A code list
+// or a linked entity with up to INLINE_VALUES_MAX instances is inlined with
+// its URIs, so the LLM can filter on the link without a lookup.
 import { fetchCodeList } from './explore.js';
 
 // The menu: how a spec looks, then per entity each field and its type: a
@@ -27,6 +27,7 @@ In sh:path, use the predicate URI shown after each field name, not the field nam
 An inverse hop (the field shows "(inverse)") goes in the list as [ sh:inversePath <predicate> ] .
 When two entities share one sh:targetClass, pick one with rep:entity <the URI after the entity>.
 A field that links to several entities ("→ a or b") reaches all of them; the steps after it decide. To keep one kind, add a rep:where on a step only that kind has.
+To filter on what a link reaches (a code, a bestuurseenheid, anything with a name), end the filter path on the link and give the URI: sh:property [ sh:path ( <link> ) ; sh:hasValue <uri> ], or sh:in ( <uri> <uri> ) for several. The URI is in the values listed after the field, or lookup_values finds it. Compare the name text only when no URI can be found.
 A date filter is sh:minInclusive or sh:maxInclusive with "yyyy-mm-ddThh:mm:ss"^^xsd:dateTime.
 The time is required: T00:00:00 starts a day, T23:59:59 ends it.
 (the xsd prefix above is not copied: add @prefix xsd: <http://www.w3.org/2001/XMLSchema#>).
@@ -34,10 +35,14 @@ The time is required: T00:00:00 starts a day, T23:59:59 ends it.
   for (const shape of profile.shapes) {
     lines.push(`${shape.label || shape.targetClass} — sh:targetClass <${shape.targetClass}> ; rep:entity <${shape.uri}>`);
     for (const f of shape.fields) {
-      const kind = f.datatype ? formatDatatype(f.datatype)
-        : f.class ? `→ ${formatConceptLabel(f.class, await fetchCodeList(f.class))}`
-        : f.nodes.length ? `→ ${f.nodes.map(n => formatLinkedLabel(profile, n)).join(' or ')}`
-        : '?';
+      let kind = '?';
+      if (f.datatype) kind = formatDatatype(f.datatype);
+      else if (f.class) kind = `→ ${formatConceptLabel(f.class, await fetchCodeList(f.class))}`;
+      else if (f.nodes.length) {
+        const links = [];
+        for (const n of f.nodes) links.push(await formatLinkedLabel(profile, n));
+        kind = `→ ${links.join(' or ')}`;
+      }
       const dir = f.inverse ? ' (inverse)' : '';
       const pathShown = f.path || '?';
       lines.push(`  ${f.name || pathShown}  sh:path <${pathShown}>${dir}  ${kind}`);
@@ -48,19 +53,29 @@ The time is required: T00:00:00 starts a day, T23:59:59 ends it.
 }
 
 // A code-list field: the list's name and, when the list is short, its
-// values, so the model needs no lookup. "…" only when the list holds more
-// than it shows.
+// values with their URIs, so the model needs no lookup. "…" only when the
+// list holds more than it shows.
 function formatConceptLabel(type, { values, more }) {
   if (!values.length) return shortenUri(type);
-  const names = values.map(v => v.label).join(', ');
-  return `${shortenUri(type)} — ${values.length} waarden: ${names}${more ? ', …' : ''}`;
+  return `${shortenUri(type)} — ${values.length} waarden: ${formatValues(values)}${more ? ', …' : ''}`;
 }
 
-// A link to another entity: its name plus "(veel)", many. Unlike a short
-// code list, its values are not listed in the menu.
-function formatLinkedLabel(profile, nodeUri) {
+// A link to another entity: its name and, when that entity has few
+// instances (a code), its values with their URIs, so the model can filter
+// on the link without a lookup. "(veel)" when there are more: then
+// lookup_values finds the URI.
+async function formatLinkedLabel(profile, nodeUri) {
   const s = profile.shapes.find(x => x.uri === nodeUri);
-  return s ? `${s.label || s.targetClass} (veel)` : shortenUri(nodeUri);
+  if (!s) return shortenUri(nodeUri);
+  const name = s.label || s.targetClass;
+  const { values, more } = await fetchCodeList(s.targetClass);
+  if (!values.length || more) return `${name} (veel)`;
+  return `${name} — ${values.length} waarden: ${formatValues(values)}`;
+}
+
+// "label <uri>" per value, comma separated.
+function formatValues(values) {
+  return values.map(v => `${v.label} <${v.uri}>`).join(', ');
 }
 
 // The local name of a datatype, "...#dateTime" becomes "dateTime", to keep
